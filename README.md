@@ -1,2 +1,2 @@
-# smartgate
-Object Recognition Smart Gate System
+# visiongate
+Computer Vision Object Recognition Gate Management System
