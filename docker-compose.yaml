@@ -1,0 +1,36 @@
+version: "3.8"
+services:
+  pg:
+    image: postgres
+    restart: always
+#    user: 1000:1000
+    expose:
+      - "5432"
+    volumes:
+      - /var/web/db/pg:/var/lib/postgresql/data
+      - $PWD/data:/tmp/data
+      - $PWD/postgresql.conf:/var/lib/postgresql/data/pgdata/postgresql.conf
+    environment:
+      PGDATA: /var/lib/postgresql/data/pgdata
+      POSTGRES_PASSWORD: smartgate
+  web:
+      image: nginx:latest
+      ports:
+          - "80:80"
+          - "443:443"
+      volumes:
+          - $PWD:/code
+          - /tmp/sock:/sock
+          - $PWD/site.conf:/etc/nginx/conf.d/default.conf
+          - $PWD/nginx.conf:/etc/nginx/nginx.conf
+          - /etc/letsencrypt:/cert
+      depends_on:
+          - "python"
+      restart: always
+  python:
+#      command: bash -c "apt-get update && apt-get -y install unzip && pip install -r /code/requirements.txt && tail -f /dev/null"
+      command: bash -c "apt-get update && apt-get -y install unzip libgl1 && pip install --upgrade pip setuptools && pip install -r /code/requirements.txt && python /code/visiongate/manage.py runserver 0.0.0.0:8000"
+      image: python:3.10
+      volumes:
+          - /var/web/visiongate:/code
+      restart: always

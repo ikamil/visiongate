@@ -1,0 +1,12 @@
+psycopg2
+django
+admin-totals
+django-admin-autocomplete-filter
+requests
+django-import-export
+Pillow
+django-jazzmin
+opencv-python
+onnxruntime
+paddlepaddle
+paddleocr
