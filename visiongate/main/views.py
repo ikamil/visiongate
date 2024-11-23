@@ -1,19 +1,15 @@
 from typing import List
-
-from django.shortcuts import render
-import asyncio
 from django.http import StreamingHttpResponse
 import cv2
 import logging
-
 from paddleocr import PaddleOCR
-
 from .models import *
 from django.shortcuts import redirect
 from .numberplate import boxes, numbers
+from .ewelink import *
 
 
-def generate(cam: Camera, src, ocr: PaddleOCR, allowed: List[str]):
+def generate(cam: Camera, src, ocr: PaddleOCR, allowed: List[str], token: str, dev: str):
 	# loop over frames from the output stream
 	num_box = 20
 	num_ocr = 20
@@ -44,6 +40,7 @@ def generate(cam: Camera, src, ocr: PaddleOCR, allowed: List[str]):
 					after_pause = 0
 					event = Event(location=cam.location, camera=cam, inout=cam.inout, payload=numbers_list, owner=cam.owner)
 					event.save()
+					ewelink_on(token, dev)
 				logging.warning(numbers_list)
 		frame = cv2.resize(frame, (590, 290), interpolation=cv2.INTER_LINEAR)
 		frame = cv2.putText(frame, prefix + (" ! " if pause else "") + numbers_list.__str__(), (15, 35), cv2.FONT_HERSHEY_SIMPLEX,	fontScale=1, color=(255, 100, 0), thickness=2, lineType=cv2.LINE_AA)
@@ -55,12 +52,9 @@ def generate(cam: Camera, src, ocr: PaddleOCR, allowed: List[str]):
 		# time.sleep(0.005)
 
 
-
 def video(request, id: int):
 	if not request.user.is_authenticated:
 		return redirect(f"{settings.LOGIN_URL}?next={request.path}")
-	# return the response generated along with the specific media
-	# type (mime type)
 	from paddleocr import PaddleOCR
 	ocr = PaddleOCR(lang="en")
 	cam = Camera.objects.get(id=id)
@@ -71,7 +65,8 @@ def video(request, id: int):
 	else:
 		allowed = []
 	src = cam.sample.path
-	res = StreamingHttpResponse(generate(cam, src, ocr, allowed), content_type = "multipart/x-mixed-replace; boundary=frame")
+	token = ewelink_auth()
+	res = StreamingHttpResponse(generate(cam, src, ocr, allowed, token, "10022fe655"), content_type = "multipart/x-mixed-replace; boundary=frame")
 	# res["Cache-Control"] = "no-cache"  # prevent client cache
 	# res["X-Accel-Buffering"] = "no"  # Allow Stream over NGINX server
 	return res
@@ -80,11 +75,6 @@ def video(request, id: int):
 import time
 
 def streaming_view(request):
-	async def async_generator():
-		for i in range(3):
-			await asyncio.sleep(1)  # Асинхронная задержка
-			yield i  # Генерация значения
-
 	def stream_data():
 		for i in range(3):
 			time.sleep(1)

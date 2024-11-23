@@ -1,3 +1,4 @@
 /cert/
 /.idea/
 /visiongate/uploads/
+/visiongate/main/creds.py
