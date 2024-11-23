@@ -77,8 +77,8 @@ class BaseAdmin(admin.ModelAdmin):
 
 @admin.register(Location)
 class LocationAdmin(BaseAdmin):
-    fields = ["code", "name", "address", "allowed", "description"]
-    list_display = ("code", "name", "address")
+    fields = ["code", "name", "address", "allowed", "device", "status", "description"]
+    list_display = ("code", "name", "address", "device", "status")
     search_fields = ("code", "name", "address")
 
 

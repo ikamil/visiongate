@@ -1,7 +1,6 @@
 from typing import List
 from django.http import StreamingHttpResponse
 import cv2
-import logging
 from paddleocr import PaddleOCR
 from .models import *
 from django.shortcuts import redirect
@@ -66,7 +65,7 @@ def video(request, id: int):
 		allowed = []
 	src = cam.sample.path
 	token = ewelink_auth()
-	res = StreamingHttpResponse(generate(cam, src, ocr, allowed, token, "10022fe655"), content_type = "multipart/x-mixed-replace; boundary=frame")
+	res = StreamingHttpResponse(generate(cam, src, ocr, allowed, token, cam.location.device), content_type = "multipart/x-mixed-replace; boundary=frame")
 	# res["Cache-Control"] = "no-cache"  # prevent client cache
 	# res["X-Accel-Buffering"] = "no"  # Allow Stream over NGINX server
 	return res

@@ -19,6 +19,8 @@ def post(token, json):
 
 def ewelink_on(token: str, dev: str):
     switch = {"type": 1, "id": dev, "params": {"switches": [{"switch": "on", "outlet": 0}]}}
+    if not token:
+        token = ewelink_auth()
     res = post(token, switch)
     if "token" in res["msg"] or res["error"] != 0:
         token = ewelink_auth()
