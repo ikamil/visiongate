@@ -95,8 +95,20 @@ class CameraAdmin(BaseAdmin):
         frm.appendChild(fr);"><strong>Включить модель детекции образов.</strong>"!" - обнаружено</div></div>""")
     controlpreview.short_description = "Просмотр контроля"
 
-    readonly_fields = ("videopreview", "controlpreview", )
-    fields = ["code", "title", "name", "inout", "sample", "videopreview", "url", "controlpreview", "location", "description"]
+    def location_control(self, obj):
+        btn_template = """<div style="display: inline-grid; width: 125px; height: 40px; line-height: 40px; border-style: groove; background-color: #EBEBEB; cursor: pointer; text-align: center;" id="%s"
+            onClick="fetch('/%s/%s').then(function(res){return res.json();}).then(function(data) {document.getElementById('status').textContent = '🔄 ' + data.status_title;})">%s</div>"""
+        return mark_safe(
+            (btn_template % ("status", "status", obj.location.id, "🔄 " + obj.location.get_status_display())
+            ) + (btn_template % ("open", "open", obj.location.id, "Открыть")
+            ) + (btn_template % ("close", "close", obj.location.id, "Закрыть"))
+        )
+
+    location_control.short_description = "Управление"
+
+    readonly_fields = ("videopreview", "controlpreview", "location_control")
+    fields = ["code", "title", "name", "inout", "sample", "videopreview", "url", "location_control", "controlpreview",
+              "location", "description"]
     list_display = ("code", "title", "inout", "sample", "url", "location")
     list_filter = ("location",)
     search_fields = ("code", "title", "name", "sample", "url", "location__name")
@@ -104,8 +116,8 @@ class CameraAdmin(BaseAdmin):
 
 @admin.register(Event)
 class EventAdmin(ExportMixin, BaseAdmin):
-    fields = ["location", "camera", "inout", "payload", "created"]
-    list_display = ("created", "location", "camera", "inout")
+    fields = ["location", "camera", "inout", "status", "payload", "created"]
+    list_display = ("created", "location", "camera", "inout", "status")
     list_filter = ("location",)
     search_fields = ("camera__name", "camera__url", "location__name", "location__address")
 

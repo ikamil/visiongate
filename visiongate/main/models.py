@@ -12,6 +12,7 @@ STATUS = (
     ("CLOSED", "Закрыт"),
     ("OPENING", "Открывается"),
     ("CLOSING", "Закрывается"),
+    ("ERROR", "Ошибка"),
 )
 
 class Location(models.Model):
@@ -20,6 +21,7 @@ class Location(models.Model):
     address = models.CharField(verbose_name="Адрес", max_length=500, blank=True, null=True)
     allowed = models.TextField(verbose_name="Разрешённые", blank=True, null=True)
     device = models.CharField(verbose_name="Устройство", max_length=500, blank=True, null=True)
+    token = models.CharField(verbose_name="Токен сессии устройства", max_length=500, blank=True, null=True)
     status = models.CharField(verbose_name="Статус", choices=STATUS, default="CLOSED", max_length=7)
     description = models.TextField(verbose_name="Описание", blank=True, null=True)
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.DO_NOTHING, blank=True, null=True, verbose_name="Владелец")
@@ -64,9 +66,10 @@ class Camera(models.Model):
 
 class Event(models.Model):
     location = models.ForeignKey(Location, verbose_name="Локация", on_delete=models.PROTECT, related_name="+")
-    camera = models.ForeignKey(Camera, verbose_name="Камера", on_delete=models.PROTECT)
-    inout = models.CharField(verbose_name="Направление", choices=IN_OUT, default="IN", max_length=5)
-    payload = models.CharField(verbose_name="Объекты", max_length=2000, blank=True, null=True)
+    camera = models.ForeignKey(Camera, verbose_name="Камера", on_delete=models.PROTECT, blank=True, null=True)
+    inout = models.CharField(verbose_name="Направление", choices=IN_OUT, max_length=5, blank=True, null=True)
+    status = models.CharField(verbose_name="Статус", choices=STATUS, max_length=7, blank=True, null=True)
+    payload = models.CharField(verbose_name="Информация", max_length=2000, blank=True, null=True)
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.DO_NOTHING, blank=True, null=True, verbose_name="Владелец")
     created = models.DateTimeField(default=now, verbose_name="Дата и время")
     changed = models.DateTimeField(default=now)

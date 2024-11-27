@@ -1,7 +1,11 @@
 import requests
+from aiohttp import payload
+
 from .creds import *
 import base64, hmac, json, hashlib
 import logging
+from .models import *
+import time
 URL = "https://eu-apia.coolkit.cc/v2/"
 
 
@@ -24,4 +28,31 @@ def ewelink_on(token: str, dev: str):
     res = post(token, switch)
     if "token" in res["msg"] or res["error"] != 0:
         token = ewelink_auth()
-        post(token, switch)
+        res = post(token, switch)
+    logging.warning(res)
+    return res
+
+
+def open_close(loc: Location, do_open: bool = True):
+    def set_status(status, token, payload):
+        loc.status = status
+        if token:
+            loc.token = token
+        loc.changed = now()
+        loc.save()
+        event = Event(location=loc, status=status, owner=loc.owner, payload=payload)
+        event.save()
+
+    STATUS = "OPEN" if do_open else "CLOSED"
+    ACTION = "OPENING" if do_open else "CLOSING"
+    WAIT = "CLOSING" if do_open else "OPENING"
+
+    if loc.status not in (STATUS, ACTION):
+        if loc.status == WAIT:
+            time.sleep(1)
+        set_status(ACTION, None, dict(device=loc.device))
+        res = ewelink_on(loc.token, loc.device)
+        if res["error"]:
+            set_status("ERROR", loc.token, res)
+        else:
+            set_status(STATUS, loc.token, res)
