@@ -33,19 +33,26 @@ def ewelink_on(token: str, dev: str):
     return res
 
 
-def open_close(loc: Location, do_open: bool = True):
+def open_close(cam: Camera, do_open: bool = True):
+    STATUS = "OPEN" if do_open else "CLOSED"
+    ACTION = "OPENING" if do_open else "CLOSING"
+    WAIT = "CLOSING" if do_open else "OPENING"
+    loc = cam.location
+
     def set_status(status, token, payload):
         loc.status = status
         if token:
             loc.token = token
+        if status == "OPEN":
+            loc.opened_date = now()
+            loc.opened_by = cam.inout
+        else:
+            loc.opened_date = None
+            loc.opened_by = None
         loc.changed = now()
         loc.save()
         event = Event(location=loc, status=status, owner=loc.owner, payload=payload)
         event.save()
-
-    STATUS = "OPEN" if do_open else "CLOSED"
-    ACTION = "OPENING" if do_open else "CLOSING"
-    WAIT = "CLOSING" if do_open else "OPENING"
 
     if loc.status not in (STATUS, ACTION):
         if loc.status == WAIT:

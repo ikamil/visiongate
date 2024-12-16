@@ -14,6 +14,11 @@ STATUS = (
     ("CLOSING", "Закрывается"),
     ("ERROR", "Ошибка"),
 )
+IN_OUT = (
+    ("IN", "Вход"),
+    ("OUT", "Выход"),
+)
+
 
 class Location(models.Model):
     code = models.CharField(verbose_name="Код", max_length=255, unique=True)
@@ -23,6 +28,8 @@ class Location(models.Model):
     device = models.CharField(verbose_name="Устройство", max_length=500, blank=True, null=True)
     token = models.CharField(verbose_name="Токен сессии устройства", max_length=500, blank=True, null=True)
     status = models.CharField(verbose_name="Статус", choices=STATUS, default="CLOSED", max_length=7)
+    opened_date = models.DateTimeField(verbose_name="Дата открытия", blank=True, null=True)
+    opened_by = models.CharField(verbose_name="Открыто камерой", choices=IN_OUT, max_length=5, blank=True, null=True)
     description = models.TextField(verbose_name="Описание", blank=True, null=True)
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.DO_NOTHING, blank=True, null=True, verbose_name="Владелец")
     created = models.DateTimeField(default=now)
@@ -35,12 +42,6 @@ class Location(models.Model):
 
     def __str__(self):
         return self.name or self.code
-
-
-IN_OUT = (
-    ("IN", "Вход"),
-    ("OUT", "Выход"),
-)
 
 class Camera(models.Model):
     code = models.CharField(verbose_name="Код", max_length=255, unique=True)

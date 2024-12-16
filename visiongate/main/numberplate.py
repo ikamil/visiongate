@@ -25,9 +25,10 @@ def preprocess_image(cv2_image: np.ndarray) -> np.ndarray:
     np_image = np_image.astype(np.float32)
     # перестановка местами размерностей из [H, W, C] в [C, H, W]
     np_image = np_image.transpose(2, 0, 1)
+    return np_image
     # добавление размерности по батчу [1, C, H, W]
-    input_np_image = np.expand_dims(np_image, axis=0)
-    return input_np_image
+    # input_np_image = np.expand_dims(np_image, axis=0)
+    # return input_np_image
 
 def intersection(box1: np.ndarray, box2: np.ndarray) -> float:
     box1_x1, box1_y1, box1_x2, box1_y2 = box1[:4]
@@ -72,24 +73,26 @@ def model_output_to_boxes(model_output, img_width, img_height, prob_threshold, i
     detections = model_output[0]
     # перестановка размерностей выходов модели для удобства, чтобы кол-во боксов стояло нулевой размерностью
     detections = detections.transpose()
+    res = []
+    for i in range(detections.shape[-1]):
+        detections_ = detections[...,i]
+        # конвертация детекций в формат [4_координаты, индекс_класса, вероятность_класса]
+        detections_ = [convert_detections(detection, img_width, img_height) for detection in detections_]
+        # отвеивание только боксов вероятность которых более prob_threshold (0.5)
+        boxes = [detection for detection in detections_ if detection[5] > prob_threshold]
+        # сортировка по убыванию боксов по вероятности
+        boxes.sort(key=lambda x: x[5], reverse=True)
+        # итоговый список для боксов который будет возвращатся
+        boxes_list = []
+        # удаление лишних боксов (которые сильно пересекаются), пока не останется ни одного
+        while len(boxes) > 0:
+            # добавляем первый самый вероятный бокс в итоговый список
+            boxes_list.append(boxes[0])
+            # из остальных оставляем только те которые пересекаются с текущим не сильно (меньше iou_threshold)
+            boxes = [box for box in boxes if iou(box, boxes[0]) < iou_threshold]
+        res.append(boxes_list)
 
-    # конвертация детекций в формат [4_координаты, индекс_класса, вероятность_класса]
-    detections = [convert_detections(detection, img_width, img_height) for detection in detections]
-    # отвеивание только боксов вероятность которых более prob_threshold (0.5)
-    boxes = [detection for detection in detections if detection[5] > prob_threshold]
-    # сортировка по убыванию боксов по вероятности
-    boxes.sort(key=lambda x: x[5], reverse=True)
-
-    # итоговый список для боксов который будет возвращатся
-    boxes_list = []
-    # удаление лишних боксов (которые сильно пересекаются), пока не останется ни одного
-    while len(boxes) > 0:
-        # добавляем первый самый вероятный бокс в итоговый список
-        boxes_list.append(boxes[0])
-        # из остальных оставляем только те которые пересекаются с текущим не сильно (меньше iou_threshold)
-        boxes = [box for box in boxes if iou(box, boxes[0]) < iou_threshold]
-    return boxes_list
-
+    return res
 
 def perform_ocr(image_array, ocr):
     if image_array is None:
@@ -109,16 +112,21 @@ def perform_ocr(image_array, ocr):
     return "".join(detected_text)
 
 
-def boxes(frame):
+def boxes(frames):
     # предикт кадра моделью
-    # results = model(frame)
-    # image_path = 'слоны.jpg'
-    # cv2_image = cv2.imread(image_path)
-    cv2_image = frame
-    input_np_image = preprocess_image(cv2_image)
-    # вход словарь для модели inputs в формате {строка_название_входа: входной_объект}
-    inputs = {settings.ONNX_MODEL.get_inputs()[0].name: input_np_image}
+    cv2_image = frames[0]
+    for i, frame in enumerate(frames):
+        input_np_image = preprocess_image(frame)
+        if i == 0:
+            # добавление размерности по батчу [1, C, H, W]
+            inp_frames = np.expand_dims(input_np_image, axis=0)
+        else:
+            inp_frames = np.append(inp_frames, np.expand_dims(input_np_image, axis=0), axis=0)
 
+    # input_np_image = preprocess_image(cv2_image)
+    # вход словарь для модели inputs в формате {строка_название_входа: входной_объект}
+    # inputs = {settings.ONNX_MODEL.get_inputs()[0].name: input_np_image}
+    inputs = {settings.ONNX_MODEL.get_inputs()[0].name: inp_frames}
     # предикт
     outputs = settings.ONNX_MODEL.run(None, inputs)
 

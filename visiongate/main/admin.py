@@ -85,30 +85,34 @@ class LocationAdmin(BaseAdmin):
 @admin.register(Camera)
 class CameraAdmin(BaseAdmin):
     def videopreview(self, obj):
-        return mark_safe('<video controls width="450"><source src="%s" type="video/mp4" /></video>' % obj.sample.url)
-    videopreview.short_description = "Просмотр примера оригинала видео"
+        return mark_safe(f'<video controls width="450"><source src="{obj.sample.url}" type="video/mp4"/></video>' if not obj.url else """
+        <div id="vid"><div id="click" style="background-color: #EBEBEB; cursor: pointer" onClick=
+        "var frm = document.getElementById('vid'); document.getElementById('stream').remove(); var fr = document.createElement('img');
+        fr.id = 'stream'; fr.src = 'https://visiongate.ru/video/%s/'; fr.alt='Просмотр видео'; frm.appendChild(fr);">     
+        <img id="stream" src="https://visiongate.ru/video/%s" alt="Просмотр видео"/>
+        <strong>Перезапустить детекцию</strong>  "!" - обнаружено</div><script>let clk = document.getElementById('click');</script></div>""" % (obj.id, obj.id))
+    videopreview.short_description = "Просмотр видео"
 
     def controlpreview(self, obj):
-        return mark_safe(f"""<div id="iframe"><div style="background-color: #EBEBEB; cursor: pointer" 
-        onClick="var frm = document.getElementById('iframe'); console.log(frm); var fr = document.createElement('iframe');
-        fr.src = 'https://visiongate.ru/video/{obj.id}/';  fr.width = 600; fr.height = 300;
-        frm.appendChild(fr);"><strong>Включить модель детекции образов.</strong>"!" - обнаружено</div></div>""")
+        return mark_safe("""<div id="iframe"><div id="click" style="background-color: #EBEBEB; cursor: pointer" 
+        onClick="var frm = document.getElementById('iframe'); let ifrm = document.getElementById('ifrm'); if (ifrm) ifrm.remove(); var fr = document.createElement('iframe');
+        fr.id = 'ifrm'; fr.src = 'https://visiongate.ru/video/%s/';  fr.width = 600; fr.height = 300; fr.onLoad = function () {document.getElementById('click').click();}
+        frm.appendChild(fr);"><strong>Включить модель детекции образов.</strong>"!" - обнаружено</div></div>""" % obj.id)
     controlpreview.short_description = "Просмотр контроля"
 
     def location_control(self, obj):
         btn_template = """<div style="display: inline-grid; width: 125px; height: 40px; line-height: 40px; border-style: groove; background-color: #EBEBEB; cursor: pointer; text-align: center;" id="%s"
             onClick="fetch('/%s/%s').then(function(res){return res.json();}).then(function(data) {document.getElementById('status').textContent = '🔄 ' + data.status_title;})">%s</div>"""
         return mark_safe(
-            (btn_template % ("status", "status", obj.location.id, "🔄 " + obj.location.get_status_display())
-            ) + (btn_template % ("open", "open", obj.location.id, "Открыть")
-            ) + (btn_template % ("close", "close", obj.location.id, "Закрыть"))
+            (btn_template % ("status", "status", obj.id, "🔄 " + obj.location.get_status_display())
+            ) + (btn_template % ("open", "open", obj.id, "Открыть")
+            ) + (btn_template % ("close", "close", obj.id, "Закрыть"))
         )
 
     location_control.short_description = "Управление"
 
     readonly_fields = ("videopreview", "controlpreview", "location_control")
-    fields = ["code", "title", "name", "inout", "sample", "videopreview", "url", "location_control", "controlpreview",
-              "location", "description"]
+    fields = ["code", "title", "name", "inout", "sample", "videopreview", "url", "location_control", "location", "description"]
     list_display = ("code", "title", "inout", "sample", "url", "location")
     list_filter = ("location",)
     search_fields = ("code", "title", "name", "sample", "url", "location__name")

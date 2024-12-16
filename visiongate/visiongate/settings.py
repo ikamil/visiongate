@@ -25,11 +25,11 @@ SECRET_KEY = "django-insecure-28^l4oc6l-qi+0ke7=v9e==z8bd7a-+hjwdbu^&0g=o8l4!(x3
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ["visiongate.ru", "192.168.1.82"]
+ALLOWED_HOSTS = ["visiongate.ru", "192.168.1.82", "python3", "localhost"]
 
 CSRF_TRUSTED_ORIGINS = ["https://visiongate.ru", "https://www.visiongate.ru"]
 
-X_FRAME_OPTIONS = 'ALLOW-FROM https://visiongate.ru'
+X_FRAME_OPTIONS = 'ALLOW-FROM https://visiongate.ru/'
 
 # Application definition
 
@@ -141,7 +141,7 @@ STATIC_URL = "/static/"
 import onnxruntime
 import os
 # OCR = PaddleOCR(lang="en", enable_mkldnn=False, show_log=False, use_mkl=True)
-ONNX_MODEL = onnxruntime.InferenceSession(path_or_bytes=os.path.join(BASE_DIR, "main", "license_plate_detector.onnx"), providers=["CPUExecutionProvider"])
+ONNX_MODEL = onnxruntime.InferenceSession(path_or_bytes=os.path.join(BASE_DIR, "main", "license_plate_detector_2.onnx"), providers=["CPUExecutionProvider"])
 
 
 # Default primary key field type
