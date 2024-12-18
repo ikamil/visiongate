@@ -141,7 +141,11 @@ STATIC_URL = "/static/"
 import onnxruntime
 import os
 # OCR = PaddleOCR(lang="en", enable_mkldnn=False, show_log=False, use_mkl=True)
-ONNX_MODEL = onnxruntime.InferenceSession(path_or_bytes=os.path.join(BASE_DIR, "main", "license_plate_detector_2.onnx"), providers=["CPUExecutionProvider"])
+ONNX_BATCH_SIZE = 2
+ONNX_MODEL = onnxruntime.InferenceSession(
+    path_or_bytes=os.path.join(BASE_DIR, "main", f"license_plate_detector_{ONNX_BATCH_SIZE}.onnx"),
+    providers=["CPUExecutionProvider"]
+)
 
 
 # Default primary key field type

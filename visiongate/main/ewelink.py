@@ -1,5 +1,4 @@
 import requests
-from aiohttp import payload
 
 from .creds import *
 import base64, hmac, json, hashlib

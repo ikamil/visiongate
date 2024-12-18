@@ -71,6 +71,7 @@ class Event(models.Model):
     inout = models.CharField(verbose_name="Направление", choices=IN_OUT, max_length=5, blank=True, null=True)
     status = models.CharField(verbose_name="Статус", choices=STATUS, max_length=7, blank=True, null=True)
     payload = models.CharField(verbose_name="Информация", max_length=2000, blank=True, null=True)
+    image = models.ImageField(verbose_name="Фото", upload_to=imgpath, blank=True, null=True)
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.DO_NOTHING, blank=True, null=True, verbose_name="Владелец")
     created = models.DateTimeField(default=now, verbose_name="Дата и время")
     changed = models.DateTimeField(default=now)

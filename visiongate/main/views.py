@@ -8,11 +8,13 @@ import cv2
 from paddleocr import PaddleOCR
 from .models import *
 from django.shortcuts import redirect
+from django.core.files import File
 from django.db.models import Q
 from .numberplate import boxes, numbers
 from .ewelink import *
 from django.forms.models import model_to_dict
-import asyncio
+import os
+import io
 
 
 async def gate_open(request, id: int, do_open: bool):
@@ -47,9 +49,10 @@ async def gate_open(request, id: int, do_open: bool):
 
 def generate(cam: Camera, src, ocr: PaddleOCR, allowed: List[str], is_local: bool):
 	# loop over frames from the output stream
-	num_box = 15
-	batch = 2
+	num_box = 20
+	batch = settings.ONNX_BATCH_SIZE
 	num_ocr = num_box * batch
+	num_stream = 3
 	cnt = 0
 	after_pause = 0
 	pause = False
@@ -58,42 +61,46 @@ def generate(cam: Camera, src, ocr: PaddleOCR, allowed: List[str], is_local: boo
 	cap = cv2.VideoCapture(src)
 	numbers_list = []
 	frames = []
-	prefix = (str(allowed) if len(allowed) == 1 else len(allowed)) + ": "
+	prefix = (str(allowed) if len(allowed) == 1 else str(len(allowed))) + ": "
 	while cap.isOpened():
 		ret, frame = cap.read()
 		if not ret:
 			break
 			# encode the frame in JPEG format
 			# ensure the frame was successfully encoded
+		cnt += 1
 		if pause:
 			after_pause += 1
-			if divmod(after_pause, again)[1] == 0:
+			if after_pause % again == 0:
 				pause = False
-		if is_local and divmod(cnt, num_box)[1] == 0 and not pause:
+		if cnt % num_box == 0 and not pause:
 			frames.append(frame)
 			if len(frames) == batch:
 				frames_boxes_list = boxes(frames)
 				nums = []
 				for boxes_list, frame_ in zip(frames_boxes_list, frames):
-					logging.warning(boxes_list)
-					if divmod(cnt, num_ocr)[1] == 0:
+					if cnt % num_ocr == 0:
 						nums.extend(numbers(frame_, boxes_list, ocr))
 				numbers_list = list(set(nums))
 				if any([x in numbers_list for x in allowed]):
 					pause = True
 					after_pause = 0
 					open_close(cam)
-				if len(numbers_list) > 0 and numbers_list[0]:
-					event = Event(location=cam.location, camera=cam, inout=cam.inout, payload=numbers_list, owner=cam.owner)
+				if cnt == num_ocr or (len(numbers_list) > 0 and numbers_list[0]):
+					event = Event(location=cam.location, camera=cam, inout=cam.inout, payload=numbers_list, image="img.jpg", owner=cam.owner)
+					(flag, encodedImage) = cv2.imencode(".jpg", frame)
+					event.image.save(
+						os.path.basename(event.image.url),
+						File(io.BytesIO(encodedImage.tobytes()))
+					)
 					event.save()
-				logging.warning(numbers_list)
+				logging.warning(f"cnt={cnt}, {frames_boxes_list}, {numbers_list}")
 				frames = []
 		if not is_local:
 			frame = cv2.resize(frame, (590, 290), interpolation=cv2.INTER_LINEAR)
 			frame = cv2.putText(frame, prefix + (" ! " if pause else "") + numbers_list.__str__(), (15, 35), cv2.FONT_HERSHEY_SIMPLEX,	fontScale=1, color=(255, 100, 0), thickness=2, lineType=cv2.LINE_AA)
 			(flag, encodedImage) = cv2.imencode(".jpg", frame)
 			jpeg_bytes = encodedImage.tobytes()
-			cnt += 1
 			# yield the output frame in the byte format
 			yield(b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
 			# time.sleep(0.005)
@@ -127,7 +134,7 @@ def video(request, id: int):
 	loc = cam.location
 	logging.warning(f"ocr loaded cam={loc}")
 	if loc.allowed:
-		allowed = loc.allowed.split("\n")
+		allowed = loc.allowed.replace("\r", "").split("\n")
 		allowed = [x.strip().upper() for x in allowed]
 	else:
 		allowed = []

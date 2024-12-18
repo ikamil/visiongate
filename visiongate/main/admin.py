@@ -87,8 +87,7 @@ class CameraAdmin(BaseAdmin):
     def videopreview(self, obj):
         return mark_safe(f'<video controls width="450"><source src="{obj.sample.url}" type="video/mp4"/></video>' if not obj.url else """
         <div id="vid"><div id="click" style="background-color: #EBEBEB; cursor: pointer" onClick=
-        "var frm = document.getElementById('vid'); document.getElementById('stream').remove(); var fr = document.createElement('img');
-        fr.id = 'stream'; fr.src = 'https://visiongate.ru/video/%s/'; fr.alt='Просмотр видео'; frm.appendChild(fr);">     
+        "let str = document.getElementById('stream'); str.src = ''; str.src = 'https://visiongate.ru/video/%s/';">     
         <img id="stream" src="https://visiongate.ru/video/%s" alt="Просмотр видео"/>
         <strong>Перезапустить детекцию</strong>  "!" - обнаружено</div><script>let clk = document.getElementById('click');</script></div>""" % (obj.id, obj.id))
     videopreview.short_description = "Просмотр видео"
@@ -120,9 +119,14 @@ class CameraAdmin(BaseAdmin):
 
 @admin.register(Event)
 class EventAdmin(ExportMixin, BaseAdmin):
-    fields = ["location", "camera", "inout", "status", "payload", "created"]
-    list_display = ("created", "location", "camera", "inout", "status")
+    def imagepreview(self, obj):
+        return mark_safe(f'<img src="%s" alt="Фото" width="560px"/>' % obj.image.url)
+    imagepreview.short_description = "Фото"
+
+    fields = ["location", "camera", "inout", "status", "created", "payload", "image", "imagepreview"]
+    list_display = ("created", "location", "camera", "inout", "status", "payload")
     list_filter = ("location",)
+    readonly_fields = ("imagepreview",)
     search_fields = ("camera__name", "camera__url", "location__name", "location__address")
 
     def get_export_formats(self):
