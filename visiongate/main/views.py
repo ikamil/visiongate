@@ -1,12 +1,9 @@
 import datetime
 from typing import List
-from xmlrpc.client import DateTime
-
-from asgiref.sync import sync_to_async, async_to_sync
+from asgiref.sync import sync_to_async
 from django.http import StreamingHttpResponse, JsonResponse, HttpRequest
 import cv2
 from paddleocr import PaddleOCR
-from .models import *
 from django.shortcuts import redirect
 from django.core.files import File
 from django.db.models import Q
@@ -47,6 +44,18 @@ async def gate_open(request, id: int, do_open: bool):
 	return JsonResponse(res)
 
 
+def nums_allowed(numbers_list, allowed):
+	def unify(src: str) -> str:
+		res = src.replace("O", "0")
+		if res.endswith("C"):
+			res = res[:-1] + "0"
+		if res.startswith("4"):
+			res = "A" + res[1:]
+		return res
+
+	return any([unify(x) in [unify(n) for n in numbers_list] for x in allowed])
+
+
 def generate(cam: Camera, src, ocr: PaddleOCR, allowed: List[str], is_local: bool):
 	# loop over frames from the output stream
 	num_box = 20
@@ -60,6 +69,7 @@ def generate(cam: Camera, src, ocr: PaddleOCR, allowed: List[str], is_local: boo
 	last_open = datetime.datetime.now() - datetime.timedelta(hours=1)
 	cap = cv2.VideoCapture(src)
 	numbers_list = []
+	prev_numbers = []
 	frames = []
 	prefix = (str(allowed) if len(allowed) == 1 else str(len(allowed))) + ": "
 	while cap.isOpened():
@@ -82,20 +92,26 @@ def generate(cam: Camera, src, ocr: PaddleOCR, allowed: List[str], is_local: boo
 					if cnt % num_ocr == 0:
 						nums.extend(numbers(frame_, boxes_list, ocr))
 				numbers_list = list(set(nums))
-				if any([x in numbers_list for x in allowed]):
+				if nums_allowed(numbers_list, allowed):
 					pause = True
 					after_pause = 0
-					open_close(cam)
+					if last_open < datetime.datetime.now() - datetime.timedelta(seconds=10):
+						open_close(cam)
+						last_open = datetime.datetime.now()
 				if cnt == num_ocr or (len(numbers_list) > 0 and numbers_list[0]):
 					event = Event(location=cam.location, camera=cam, inout=cam.inout, payload=numbers_list, image="img.jpg", owner=cam.owner)
-					(flag, encodedImage) = cv2.imencode(".jpg", frame)
-					event.image.save(
-						os.path.basename(event.image.url),
-						File(io.BytesIO(encodedImage.tobytes()))
-					)
+					if not any(x in prev_numbers for x in numbers_list):
+						(flag, encodedImage) = cv2.imencode(".jpg", frame)
+						event.image.save(
+							os.path.basename(event.image.url),
+							File(io.BytesIO(encodedImage.tobytes()))
+						)
+					else:
+						event.image = None
 					event.save()
 				logging.warning(f"cnt={cnt}, {frames_boxes_list}, {numbers_list}")
 				frames = []
+				prev_numbers = numbers_list
 		if not is_local:
 			frame = cv2.resize(frame, (590, 290), interpolation=cv2.INTER_LINEAR)
 			frame = cv2.putText(frame, prefix + (" ! " if pause else "") + numbers_list.__str__(), (15, 35), cv2.FONT_HERSHEY_SIMPLEX,	fontScale=1, color=(255, 100, 0), thickness=2, lineType=cv2.LINE_AA)
@@ -116,7 +132,6 @@ def get_client_ip(request):
 		ip = request.META.get("REMOTE_ADDR")
 	logging.warning(ip)
 	return ip == "127.0.0.1"
-	return ip in ("192.168.1.1", "127.0.0.1") or ip.startswith("172.18.")
 
 
 def video(request, id: int):
