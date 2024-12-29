@@ -53,7 +53,7 @@ def open_close(cam: Camera, do_open: bool = True):
         event = Event(location=loc, status=status, owner=loc.owner, payload=payload)
         event.save()
 
-    if loc.status not in (STATUS, ACTION):
+    if loc.status not in (STATUS, ACTION) or loc.mode == "AUTOCLOSE":
         if loc.status == WAIT:
             time.sleep(1)
         set_status(ACTION, None, dict(device=loc.device))

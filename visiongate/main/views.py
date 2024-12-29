@@ -44,15 +44,26 @@ async def gate_open(request, id: int, do_open: bool):
 	return JsonResponse(res)
 
 
-def nums_allowed(numbers_list, allowed):
-	def unify(src: str) -> str:
-		res = src.replace("O", "0")
-		if res.endswith("C"):
-			res = res[:-1] + "0"
-		if res.startswith("4"):
-			res = "A" + res[1:]
-		return res
+REPLACE = {"O": "0", "R": "K", ".": "", ",": "", "/": "7", "V": "Y", "|": "", "I": ""}
+INPLACE = {"0": {"4": "A"}, "5,6": {"C": "0", "8": "B"}}
 
+
+def nums_allowed(numbers_list, allowed) -> bool:
+	def unify(src: str) -> str:
+		res = src
+		for r, v in REPLACE.items():
+			res = res.replace(r, v)
+		for i_, d in INPLACE.items():
+			for r, v in d.items():
+				for ii in i_.split(","):
+					i = int(ii)
+					if len(res) > i and res[i] == r:
+						res = res[:i] + v + (res[i+1:] if i != -1 else "")
+		return res
+	if any([x in numbers_list for x in allowed]):
+		return True
+	if any([x in [unify(n) for n in numbers_list] for x in allowed]):
+		return True
 	return any([unify(x) in [unify(n) for n in numbers_list] for x in allowed])
 
 
@@ -83,14 +94,13 @@ def generate(cam: Camera, src, ocr: PaddleOCR, allowed: List[str], is_local: boo
 			after_pause += 1
 			if after_pause % again == 0:
 				pause = False
-		if cnt % num_box == 0 and not pause:
+		if 	is_local and cnt % num_box == 0 and not pause:
 			frames.append(frame)
 			if len(frames) == batch:
 				frames_boxes_list = boxes(frames)
 				nums = []
 				for boxes_list, frame_ in zip(frames_boxes_list, frames):
-					if cnt % num_ocr == 0:
-						nums.extend(numbers(frame_, boxes_list, ocr))
+					nums.extend(numbers(frame_, boxes_list, ocr))
 				numbers_list = list(set(nums))
 				if nums_allowed(numbers_list, allowed):
 					pause = True
@@ -98,7 +108,7 @@ def generate(cam: Camera, src, ocr: PaddleOCR, allowed: List[str], is_local: boo
 					if last_open < datetime.datetime.now() - datetime.timedelta(seconds=10):
 						open_close(cam)
 						last_open = datetime.datetime.now()
-				if cnt == num_ocr or (len(numbers_list) > 0 and numbers_list[0]):
+				if len(numbers_list) > 0 and numbers_list[0]:
 					event = Event(location=cam.location, camera=cam, inout=cam.inout, payload=numbers_list, image="img.jpg", owner=cam.owner)
 					if not any(x in prev_numbers for x in numbers_list):
 						(flag, encodedImage) = cv2.imencode(".jpg", frame)
@@ -112,14 +122,14 @@ def generate(cam: Camera, src, ocr: PaddleOCR, allowed: List[str], is_local: boo
 				logging.warning(f"cnt={cnt}, {frames_boxes_list}, {numbers_list}")
 				frames = []
 				prev_numbers = numbers_list
-		if not is_local:
+		if not is_local and cnt % 2 == 0:
 			frame = cv2.resize(frame, (590, 290), interpolation=cv2.INTER_LINEAR)
 			frame = cv2.putText(frame, prefix + (" ! " if pause else "") + numbers_list.__str__(), (15, 35), cv2.FONT_HERSHEY_SIMPLEX,	fontScale=1, color=(255, 100, 0), thickness=2, lineType=cv2.LINE_AA)
 			(flag, encodedImage) = cv2.imencode(".jpg", frame)
 			jpeg_bytes = encodedImage.tobytes()
 			# yield the output frame in the byte format
 			yield(b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
-			# time.sleep(0.005)
+			# time.sleep(0.2)
 		else:
 			yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + b'' + b'\r\n')
 

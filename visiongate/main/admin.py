@@ -75,9 +75,18 @@ class BaseAdmin(admin.ModelAdmin):
         return super(BaseAdmin, self)._changeform_view(request, object_id=object_id, form_url=form_url, extra_context=extra_context)
 
 
+BTN_TEMPLATE = """<div style="display: inline-grid; width: 125px; height: 40px; line-height: 40px; border-style: groove; background-color: #EBEBEB; cursor: pointer; text-align: center;" id="%s"
+    onClick="fetch('/%s/%s').then(function(res){return res.json();}).then(function(data) {document.getElementById('status').textContent = data.status_title;})">%s</div>"""
+
+
 @admin.register(Location)
 class LocationAdmin(BaseAdmin):
-    fields = ["code", "name", "address", "allowed", "device", "status", "description"]
+    def location_control(self, obj):
+        return mark_safe(BTN_TEMPLATE % ("status", "open" if str(obj.status).startswith("CLOS") else "close", obj.id, "🔄 " + obj.location.get_status_display()))
+
+    location_control.short_description = "Нажать кнопку"
+    readonly_fields = ("location_control", )
+    fields = ["code", "name", "address", "allowed", "device", "location_control", "status", "mode", "description"]
     list_display = ("code", "name", "address", "device", "status")
     search_fields = ("code", "name", "address")
 
@@ -89,7 +98,7 @@ class CameraAdmin(BaseAdmin):
         <div id="vid"><div id="click" style="background-color: #EBEBEB; cursor: pointer" onClick=
         "let str = document.getElementById('stream'); str.src = ''; str.src = 'https://visiongate.ru/video/%s/';">     
         <img id="stream" src="https://visiongate.ru/video/%s" alt="Просмотр видео"/>
-        <strong>Перезапустить детекцию</strong>  "!" - обнаружено</div><script>let clk = document.getElementById('click');</script></div>""" % (obj.id, obj.id))
+        <strong>Перезапустить</strong></div><script>let clk = document.getElementById('click');</script></div>""" % (obj.id, obj.id))
     videopreview.short_description = "Просмотр видео"
 
     def controlpreview(self, obj):
@@ -100,12 +109,10 @@ class CameraAdmin(BaseAdmin):
     controlpreview.short_description = "Просмотр контроля"
 
     def location_control(self, obj):
-        btn_template = """<div style="display: inline-grid; width: 125px; height: 40px; line-height: 40px; border-style: groove; background-color: #EBEBEB; cursor: pointer; text-align: center;" id="%s"
-            onClick="fetch('/%s/%s').then(function(res){return res.json();}).then(function(data) {document.getElementById('status').textContent = '🔄 ' + data.status_title;})">%s</div>"""
         return mark_safe(
-            (btn_template % ("status", "status", obj.id, "🔄 " + obj.location.get_status_display())
-            ) + (btn_template % ("open", "open", obj.id, "Открыть")
-            ) + (btn_template % ("close", "close", obj.id, "Закрыть"))
+            (BTN_TEMPLATE % ("status", "status", obj.id, "🔄 " + obj.location.get_status_display())
+            ) + (BTN_TEMPLATE % ("open", "open", obj.id, "Открыть")
+            ) + (BTN_TEMPLATE % ("close", "close", obj.id, "Закрыть"))
         )
 
     location_control.short_description = "Управление"
@@ -125,9 +132,9 @@ class EventAdmin(ExportMixin, BaseAdmin):
 
     fields = ["location", "camera", "inout", "status", "created", "payload", "image", "imagepreview"]
     list_display = ("created", "location", "camera", "inout", "status", "payload")
-    list_filter = ("location",)
+    list_filter = ("location", "status")
     readonly_fields = ("imagepreview",)
-    search_fields = ("camera__name", "camera__url", "location__name", "location__address")
+    search_fields = ("payload",)
 
     def get_export_formats(self):
         return [CSV]

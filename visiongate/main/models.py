@@ -18,6 +18,10 @@ IN_OUT = (
     ("IN", "Вход"),
     ("OUT", "Выход"),
 )
+MODE = (
+    ("MANUAL", "Ручной"),
+    ("AUTOCLOSE", "Автоматически закрыт"),
+)
 
 
 class Location(models.Model):
@@ -28,6 +32,7 @@ class Location(models.Model):
     device = models.CharField(verbose_name="Устройство", max_length=500, blank=True, null=True)
     token = models.CharField(verbose_name="Токен сессии устройства", max_length=500, blank=True, null=True)
     status = models.CharField(verbose_name="Статус", choices=STATUS, default="CLOSED", max_length=7)
+    mode = models.CharField(verbose_name="Статус", choices=MODE, default="MANUAL", max_length=10, blank=True, null=True)
     opened_date = models.DateTimeField(verbose_name="Дата открытия", blank=True, null=True)
     opened_by = models.CharField(verbose_name="Открыто камерой", choices=IN_OUT, max_length=5, blank=True, null=True)
     description = models.TextField(verbose_name="Описание", blank=True, null=True)

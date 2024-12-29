@@ -1,0 +1,1 @@
+while :; do docker exec docker-python3-1 wget localhost:8002/video/2 -O /dev/null; sleep 2; docker exec -it docker-python3-1 rm /core; done
