@@ -45,10 +45,16 @@ async def gate_open(request, id: int, do_open: bool):
 
 
 REPLACE = {"O": "0", "R": "K", ".": "", ",": "", "/": "7", "V": "Y", "|": "", "I": ""}
-INPLACE = {"0": {"4": "A"}, "5,6": {"C": "0", "8": "B"}}
+INPLACE = {"0": {"4": "A"}, "5,6": {"C": "0", "8": "B", "1": "T", "3": "B", "7": "T"}, "2,3,4": {"B": "8"}}
+CHANGES = {"10": {"7": ""}}
 
 
-def nums_allowed(numbers_list, allowed) -> bool:
+def nums_allowed(numbers_list, allowed) -> List[str]:
+	def change(src: str, i: int, v: str) -> str:
+		res = src
+		res = res[:i] + v + (res[i + 1:] if i != -1 else "")
+		return res
+
 	def unify(src: str) -> str:
 		res = src
 		for r, v in REPLACE.items():
@@ -58,13 +64,28 @@ def nums_allowed(numbers_list, allowed) -> bool:
 				for ii in i_.split(","):
 					i = int(ii)
 					if len(res) > i and res[i] == r:
-						res = res[:i] + v + (res[i+1:] if i != -1 else "")
+						res = change(res, i, v)
+		for l_, c in CHANGES.items():
+			for ll in l_.split(","):
+				l = int(ll)
+				if len(res) == l:
+					for i_, v in c.items():
+						for ii in i_.split(","):
+							i = int(ii)
+							if len(res) > i:
+								res = change(res, i, v)
 		return res
-	if any([x in numbers_list for x in allowed]):
-		return True
-	if any([x in [unify(n) for n in numbers_list] for x in allowed]):
-		return True
-	return any([unify(x) in [unify(n) for n in numbers_list] for x in allowed])
+
+	res = [x for x in numbers_list if x in allowed]
+	if len(res):
+		return res
+
+	uni_nums = [unify(x) for x in numbers_list]
+	res = [x for x in uni_nums if x in allowed]
+	if len(res):
+		return res
+
+	return [x for x in uni_nums if x in [unify(n) for n in allowed]]
 
 
 def generate(cam: Camera, src, ocr: PaddleOCR, allowed: List[str], is_local: bool):
@@ -78,6 +99,8 @@ def generate(cam: Camera, src, ocr: PaddleOCR, allowed: List[str], is_local: boo
 	pause = False
 	again = 200
 	last_open = datetime.datetime.now() - datetime.timedelta(hours=1)
+	last_num_save = datetime.datetime.now() - datetime.timedelta(hours=1)
+	last_photo_save = datetime.datetime.now() - datetime.timedelta(hours=1)
 	cap = cv2.VideoCapture(src)
 	numbers_list = []
 	prev_numbers = []
@@ -102,23 +125,28 @@ def generate(cam: Camera, src, ocr: PaddleOCR, allowed: List[str], is_local: boo
 				for boxes_list, frame_ in zip(frames_boxes_list, frames):
 					nums.extend(numbers(frame_, boxes_list, ocr))
 				numbers_list = list(set(nums))
-				if nums_allowed(numbers_list, allowed):
+				allow_nums = nums_allowed(numbers_list, allowed)
+				if len(allow_nums) > 0:
 					pause = True
 					after_pause = 0
 					if last_open < datetime.datetime.now() - datetime.timedelta(seconds=10):
 						open_close(cam)
 						last_open = datetime.datetime.now()
-				if len(numbers_list) > 0 and numbers_list[0]:
-					event = Event(location=cam.location, camera=cam, inout=cam.inout, payload=numbers_list, image="img.jpg", owner=cam.owner)
-					if not any(x in prev_numbers for x in numbers_list):
-						(flag, encodedImage) = cv2.imencode(".jpg", frame)
-						event.image.save(
-							os.path.basename(event.image.url),
-							File(io.BytesIO(encodedImage.tobytes()))
-						)
-					else:
-						event.image = None
-					event.save()
+				if len(numbers_list) > 0 and (numbers_list[0] or last_num_save < datetime.datetime.now() - datetime.timedelta(minutes=10)):
+					same_nums = nums_allowed(numbers_list, prev_numbers)
+					if len(same_nums) == 0 or last_num_save < datetime.datetime.now() - datetime.timedelta(minutes=1):
+						event = Event(location=cam.location, camera=cam, inout=cam.inout, payload=numbers_list, image="img.jpg", owner=cam.owner)
+						if len(same_nums) == 0 or last_photo_save < datetime.datetime.now() - datetime.timedelta(minutes=10):
+							(flag, encodedImage) = cv2.imencode(".jpg", frame)
+							event.image.save(
+								os.path.basename(event.image.url),
+								File(io.BytesIO(encodedImage.tobytes()))
+							)
+							last_photo_save = datetime.datetime.now()
+						else:
+							event.image = None
+						event.save()
+						last_num_save = datetime.datetime.now()
 				logging.warning(f"cnt={cnt}, {frames_boxes_list}, {numbers_list}")
 				frames = []
 				prev_numbers = numbers_list
