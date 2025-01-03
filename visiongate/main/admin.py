@@ -2,8 +2,11 @@ from django.contrib import admin
 from django.db.models import Q
 from datetime import datetime
 from .models import *
+from management.models import LocationUser
 from django.utils.safestring import mark_safe
 from django.conf.locale.es import formats as es_formats
+from django.contrib.auth.models import User
+from django.contrib.admin import SimpleListFilter
 from import_export.admin import ExportMixin
 from import_export.formats.base_formats import CSV
 
@@ -45,7 +48,7 @@ class BaseAdmin(admin.ModelAdmin):
         if not (request.user.groups.filter(name="admin") or request.user.is_superuser):
             for ro in readonly_always:
                 if hasattr(obj, ro):
-                    fields += ro
+                    fields += (ro, )
         return fields
 
     def save_model(self, request, obj, form, change):
@@ -75,14 +78,74 @@ class BaseAdmin(admin.ModelAdmin):
         return super(BaseAdmin, self)._changeform_view(request, object_id=object_id, form_url=form_url, extra_context=extra_context)
 
 
+class LocationFilter(SimpleListFilter):
+    title = 'Локация'
+    parameter_name = 'Локация'
+    model = None
+    ids=set()
+
+    def lookups(self, request, model_admin):
+        if request.user.is_superuser or request.user.groups.filter(name='prorab'):
+            locations = Location.objects.filter(deleted__isnull=True)
+        else:
+            self.ids = LocationUser.objects.filter(Q(user=request.user) & Q(deleted__isnull=True)).values_list('location', flat=True)
+            locations = Location.objects.filter(Q(deleted__isnull=True) & (Q(pk__in=self.ids) | Q(owner=request.user) | Q(owner__isnull=True)))
+        self.model = model_admin.model
+        return [(c.id, c.name) for c in set([c for c in locations])]
+
+    def queryset(self, request, queryset):
+        if request.user.is_superuser or request.user.groups.filter(name='admin'):
+            if self.value():
+                return queryset.filter(Q(deleted__isnull=True) & Q(location=self.value()))
+            else:
+                return queryset.filter(Q(deleted__isnull=True))
+        else:
+            if hasattr(self.model, 'owner'):
+                if self.value():
+                    return queryset.filter(Q(deleted__isnull=True) & Q(location=self.value()) & (Q(owner=request.user) | Q(owner__isnull=True)))
+                else:
+                    self.ids = LocationUser.objects.filter(Q(user=request.user) & Q(deleted__isnull=True)).values_list('location', flat=True)
+                    return queryset.filter(Q(deleted__isnull=True) & (Q(location__in=self.ids) | Q(owner=request.user) | Q(owner__isnull=True)))
+
+
+class LocationUserAdmin(BaseAdmin):
+    def render_change_form(self, request, context, *args, **kwargs):
+         if request.user.is_superuser:
+             if context['adminform'].form.fields.get('location'):
+                context['adminform'].form.fields['location'].queryset = Location.objects.filter(deleted__isnull=True)
+         else:
+             ids = LocationUser.objects.filter(Q(user=request.user) & Q(deleted__isnull=True)).values_list('location', flat=True)
+             if context['adminform'].form.fields.get('location'):
+                context['adminform'].form.fields['location'].queryset = Location.objects.filter(Q(deleted__isnull=True) & (Q(id__in=ids) | Q(owner=request.user) | Q(owner__isnull=True)))
+         return super(LocationUserAdmin, self).render_change_form(request, context, *args, **kwargs)
+
+    def get_queryset(self, request):
+        qs = super(BaseAdmin, self).get_queryset(request)
+        if request.user.is_superuser or request.user.groups.filter(name='admin'):
+            return qs.filter(deleted__isnull=True)
+        else:
+            ids = LocationUser.objects.filter(Q(user=request.user) & Q(deleted__isnull=True)).values_list('location',flat=True)
+            return qs.filter(Q(deleted__isnull=True) & (Q(owner=request.user) | Q(owner__isnull=True) | Q(location__in=ids)))
+
+    list_filter = [LocationFilter]
+
+
 BTN_TEMPLATE = """<div style="display: inline-grid; width: 125px; height: 40px; line-height: 40px; border-style: groove; background-color: #EBEBEB; cursor: pointer; text-align: center;" id="%s"
     onClick="fetch('/%s/%s').then(function(res){return res.json();}).then(function(data) {document.getElementById('status').textContent = data.status_title;})">%s</div>"""
 
 
 @admin.register(Location)
 class LocationAdmin(BaseAdmin):
+    def get_queryset(self, request):
+        qs = super(BaseAdmin, self).get_queryset(request)
+        if request.user.is_superuser or request.user.groups.filter(name='admin'):
+            return qs.filter(deleted__isnull=True)
+        else:
+            self.ids = LocationUser.objects.filter(Q(user=request.user) & Q(deleted__isnull=True)).values_list('location', flat=True)
+            return qs.filter(Q(deleted__isnull=True) & (Q(pk__in=self.ids) | Q(owner=request.user) | Q(owner__isnull=True)))
+
     def location_control(self, obj):
-        return mark_safe(BTN_TEMPLATE % ("status", "open" if str(obj.status).startswith("CLOS") else "close", obj.id, "🔄 " + obj.location.get_status_display()))
+        return mark_safe(BTN_TEMPLATE % ("status", "open" if str(obj.status).startswith("CLOS") or obj.mode == "AUTOCLOSE" else "close", obj.id, "🔄 " + obj.location.get_status_display()))
 
     location_control.short_description = "Нажать кнопку"
     readonly_fields = ("location_control", )
@@ -92,7 +155,7 @@ class LocationAdmin(BaseAdmin):
 
 
 @admin.register(Camera)
-class CameraAdmin(BaseAdmin):
+class CameraAdmin(LocationUserAdmin):
     def videopreview(self, obj):
         return mark_safe(f'<video controls width="450"><source src="{obj.sample.url}" type="video/mp4"/></video>' if not obj.url else """
         <div id="vid"><div id="click" style="background-color: #EBEBEB; cursor: pointer" onClick=
@@ -120,19 +183,18 @@ class CameraAdmin(BaseAdmin):
     readonly_fields = ("videopreview", "controlpreview", "location_control")
     fields = ["code", "title", "name", "inout", "sample", "videopreview", "url", "location_control", "location", "description"]
     list_display = ("code", "title", "inout", "sample", "url", "location")
-    list_filter = ("location",)
     search_fields = ("code", "title", "name", "sample", "url", "location__name")
 
 
 @admin.register(Event)
-class EventAdmin(ExportMixin, BaseAdmin):
+class EventAdmin(ExportMixin, LocationUserAdmin):
     def imagepreview(self, obj):
         return mark_safe(f'<img src="%s" alt="Фото" width="560px"/>' % obj.image.url)
     imagepreview.short_description = "Фото"
 
     fields = ["location", "camera", "inout", "status", "created", "payload", "image", "imagepreview"]
     list_display = ("created", "location", "camera", "inout", "status", "payload")
-    list_filter = ("location", "status")
+    list_filter = (LocationFilter, "status")
     readonly_fields = ("imagepreview",)
     search_fields = ("payload",)
 

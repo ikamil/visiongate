@@ -10,6 +10,7 @@ from django.db.models import Q
 from .numberplate import boxes, numbers
 from .ewelink import *
 from django.forms.models import model_to_dict
+from management.models import LocationUser
 import os
 import io
 
@@ -25,7 +26,8 @@ async def gate_open(request, id: int, do_open: bool):
 	@sync_to_async
 	def get_camera_loc():
 		if not user.is_superuser:
-			cam = Camera.objects.get(Q(id=id) & Q(owner_id=request.user.id))
+			ids = LocationUser.objects.filter(Q(user=request.user) & Q(deleted__isnull=True)).values_list('location', flat=True)
+			cam = Camera.objects.get(Q(id=id) & (Q(owner_id=request.user.id) | Q(location__in=ids)))
 		else:
 			cam = Camera.objects.get(Q(id=id))
 		return cam, cam.location
@@ -45,7 +47,7 @@ async def gate_open(request, id: int, do_open: bool):
 
 
 REPLACE = {"O": "0", "R": "K", ".": "", ",": "", "/": "7", "V": "Y", "|": "", "I": ""}
-INPLACE = {"0": {"4": "A"}, "5,6": {"C": "0", "8": "B", "1": "T", "3": "B", "7": "T"}, "2,3,4": {"B": "8"}}
+INPLACE = {"0": {"4": "A", "X": "K"}, "5,6": {"C": "0", "8": "B", "1": "T", "3": "B", "7": "T"}, "2,3,4": {"B": "8"}}
 CHANGES = {"10": {"7": ""}}
 
 
