@@ -159,9 +159,10 @@ class CameraAdmin(LocationUserAdmin):
     def videopreview(self, obj):
         return mark_safe(f'<video controls width="450"><source src="{obj.sample.url}" type="video/mp4"/></video>' if not obj.url else """
         <div id="vid"><div id="click" style="background-color: #EBEBEB; cursor: pointer" onClick=
-        "let str = document.getElementById('stream'); str.src = ''; str.src = 'https://visiongate.ru/video/%s/';">     
-        <img id="stream" src="https://visiongate.ru/video/%s" alt="Просмотр видео"/>
-        <strong>Перезапустить</strong></div><script>let clk = document.getElementById('click');</script></div>""" % (obj.id, obj.id))
+        "let str = document.getElementById('stream'); str.src = ''; str.src = 'https://visiongate.ru/video/%s/'; redraw();">     
+        <img id="stream" src="https://visiongate.ru/video/%s" alt="Просмотр видео"/><strong id="strong"></strong></div>
+        <script>let clk = document.getElementById('click'); let stg = document.getElementById('strong');
+        function redraw(){stg.innerText=''; setTimeout(()=>{stg.innerText='Перезапустить';}, 31000);};redraw();</script></div>""" % (obj.id, obj.id))
     videopreview.short_description = "Просмотр видео"
 
     def controlpreview(self, obj):
@@ -174,8 +175,10 @@ class CameraAdmin(LocationUserAdmin):
     def location_control(self, obj):
         return mark_safe(
             (BTN_TEMPLATE % ("status", "status", obj.id, "🔄 " + obj.location.get_status_display())
-            ) + (BTN_TEMPLATE % ("open", "open", obj.id, "Открыть")
-            ) + (BTN_TEMPLATE % ("close", "close", obj.id, "Закрыть"))
+            ) + (((BTN_TEMPLATE % ("open", "open", obj.id, "Открыть")
+            ) + (BTN_TEMPLATE % ("close", "close", obj.id, "Закрыть"))) if obj.location.mode != "AUTOCLOSE" else (
+                (BTN_TEMPLATE % ("open", "open", obj.id, "Нажать"))
+            ))
         )
 
     location_control.short_description = "Управление"

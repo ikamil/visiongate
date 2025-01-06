@@ -103,6 +103,9 @@ def generate(cam: Camera, src, ocr: PaddleOCR, allowed: List[str], is_local: boo
 	last_open = datetime.datetime.now() - datetime.timedelta(hours=1)
 	last_num_save = datetime.datetime.now() - datetime.timedelta(hours=1)
 	last_photo_save = datetime.datetime.now() - datetime.timedelta(hours=1)
+	last_cam_frame = datetime.datetime.now() - datetime.timedelta(hours=1)
+	last_cam_msecs = 500
+	cam_started = datetime.datetime.now()
 	cap = cv2.VideoCapture(src)
 	numbers_list = []
 	prev_numbers = []
@@ -152,16 +155,22 @@ def generate(cam: Camera, src, ocr: PaddleOCR, allowed: List[str], is_local: boo
 				logging.warning(f"cnt={cnt}, {frames_boxes_list}, {numbers_list}")
 				frames = []
 				prev_numbers = numbers_list
-		if not is_local and cnt % 2 == 0:
-			frame = cv2.resize(frame, (590, 290), interpolation=cv2.INTER_LINEAR)
-			frame = cv2.putText(frame, prefix + (" ! " if pause else "") + numbers_list.__str__(), (15, 35), cv2.FONT_HERSHEY_SIMPLEX,	fontScale=1, color=(255, 100, 0), thickness=2, lineType=cv2.LINE_AA)
-			(flag, encodedImage) = cv2.imencode(".jpg", frame)
-			jpeg_bytes = encodedImage.tobytes()
-			# yield the output frame in the byte format
-			yield(b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
-			# time.sleep(0.2)
+		if not is_local:
+			if last_cam_frame < datetime.datetime.now() - datetime.timedelta(milliseconds=last_cam_msecs):
+				frame = cv2.resize(frame, (590, 290), interpolation=cv2.INTER_LINEAR)
+				# frame = cv2.putText(frame, prefix + (" ! " if pause else "") + numbers_list.__str__(), (15, 35), cv2.FONT_HERSHEY_SIMPLEX,	fontScale=1, color=(255, 100, 0), thickness=2, lineType=cv2.LINE_AA)
+				(flag, encodedImage) = cv2.imencode(".jpg", frame)
+				jpeg_bytes = encodedImage.tobytes()
+				# yield the output frame in the byte format
+				yield(b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
+				last_cam_frame = datetime.datetime.now()
+				time.sleep(last_cam_msecs * 0.7 / 1000)
+			else:
+				yield
+			if cam_started < datetime.datetime.now() - datetime.timedelta(seconds=30):
+				break
 		else:
-			yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + b'' + b'\r\n')
+			yield
 
 
 def get_client_ip(request):
@@ -178,14 +187,17 @@ def video(request, id: int):
 	is_local = get_client_ip(request)
 	if not request.user.is_authenticated and not is_local:
 		return redirect(f"{settings.LOGIN_URL}?next={request.path}")
-	from paddleocr import PaddleOCR
-	ocr = PaddleOCR(lang="en")
 	if not request.user.is_superuser and not is_local:
 		cam = Camera.objects.get(Q(id=id) & Q(owner_id=request.user.id))
 	else:
 		cam = Camera.objects.get(Q(id=id))
 	if not cam:
 		return redirect(f"{settings.LOGIN_URL}?next={request.path}")
+	if is_local:
+		from paddleocr import PaddleOCR
+		ocr = PaddleOCR(lang="en")
+	else:
+		ocr = None
 	loc = cam.location
 	logging.warning(f"ocr loaded cam={loc}")
 	if loc.allowed:
