@@ -1,4 +1,6 @@
 import datetime
+from difflib import SequenceMatcher
+import numpy as np
 from typing import List
 from asgiref.sync import sync_to_async
 from django.http import StreamingHttpResponse, JsonResponse, HttpRequest
@@ -51,7 +53,7 @@ INPLACE = {"0": {"4": "A", "X": "K"}, "5,6": {"C": "0", "8": "B", "1": "T", "3":
 CHANGES = {"10": {"7": ""}}
 
 
-def nums_allowed(numbers_list, allowed) -> List[str]:
+def nums_allowed(numbers_list, allowed, sim=1.0) -> List[str]:
 	def change(src: str, i: int, v: str) -> str:
 		res = src
 		res = res[:i] + v + (res[i + 1:] if i != -1 else "")
@@ -78,6 +80,9 @@ def nums_allowed(numbers_list, allowed) -> List[str]:
 								res = change(res, i, v)
 		return res
 
+	if (len(allowed) == 1 and allowed[0] == "") or (len(numbers_list) == 1 and numbers_list[0] == ""):
+		return []
+
 	res = [x for x in numbers_list if x in allowed]
 	if len(res):
 		return res
@@ -87,7 +92,10 @@ def nums_allowed(numbers_list, allowed) -> List[str]:
 	if len(res):
 		return res
 
-	return [x for x in uni_nums if x in [unify(n) for n in allowed]]
+	if sim == 1.0:
+		return [x for x in uni_nums if x in [unify(n) for n in allowed]]
+	else:
+		return [x for x in uni_nums if any([SequenceMatcher(None, x, unify(n)).ratio() >= sim for n in allowed])]
 
 
 def generate(cam: Camera, src, ocr: PaddleOCR, allowed: List[str], is_local: bool):
@@ -111,6 +119,8 @@ def generate(cam: Camera, src, ocr: PaddleOCR, allowed: List[str], is_local: boo
 	prev_numbers = []
 	frames = []
 	prefix = (str(allowed) if len(allowed) == 1 else str(len(allowed))) + ": "
+	prev_frame: cv2.typing.MatLike = np.ndarray([])
+	prev_frame_diff_min = 11
 	while cap.isOpened():
 		ret, frame = cap.read()
 		if not ret:
@@ -122,7 +132,7 @@ def generate(cam: Camera, src, ocr: PaddleOCR, allowed: List[str], is_local: boo
 			after_pause += 1
 			if after_pause % again == 0:
 				pause = False
-		if 	is_local and cnt % num_box == 0 and not pause:
+		if is_local and cnt % num_box == 0 and not pause:
 			frames.append(frame)
 			if len(frames) == batch:
 				frames_boxes_list = boxes(frames)
@@ -135,21 +145,35 @@ def generate(cam: Camera, src, ocr: PaddleOCR, allowed: List[str], is_local: boo
 					pause = True
 					after_pause = 0
 					if last_open < datetime.datetime.now() - datetime.timedelta(seconds=10):
-						open_close(cam)
+						open_close(cam, do_open=True, save_event=False)
 						last_open = datetime.datetime.now()
-				if len(numbers_list) > 0 and (numbers_list[0] or last_num_save < datetime.datetime.now() - datetime.timedelta(minutes=10)):
-					same_nums = nums_allowed(numbers_list, prev_numbers)
-					if len(same_nums) == 0 or last_num_save < datetime.datetime.now() - datetime.timedelta(minutes=1):
+				if len(numbers_list) > 0:
+					same_nums = nums_allowed(numbers_list, prev_numbers, 0.8)
+					empty_num = len(numbers_list) == 1 and numbers_list[0] == "" and last_num_save < datetime.datetime.now() - datetime.timedelta(seconds=10)
+					if empty_num or len(same_nums) == 0 or pause or last_num_save < datetime.datetime.now() - datetime.timedelta(minutes=1):
 						event = Event(location=cam.location, camera=cam, inout=cam.inout, payload=numbers_list, image="img.jpg", owner=cam.owner)
-						if len(same_nums) == 0 or last_photo_save < datetime.datetime.now() - datetime.timedelta(minutes=10):
-							(flag, encodedImage) = cv2.imencode(".jpg", frame)
-							event.image.save(
-								os.path.basename(event.image.url),
-								File(io.BytesIO(encodedImage.tobytes()))
-							)
-							last_photo_save = datetime.datetime.now()
+						if len(same_nums) == 0 or pause or last_photo_save < datetime.datetime.now() - datetime.timedelta(minutes=10):
+							gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+							if len(prev_frame.shape):
+								diff = np.sum(cv2.subtract(prev_frame, gray_frame) ** 2) / frame.shape[0] / frame.shape[1]
+							else:
+								diff = 100.0
+							event.payload = str(numbers_list) + " => " + str(diff)
+							if diff > prev_frame_diff_min or pause:
+								(flag, encodedImage) = cv2.imencode(".jpg", frame)
+								event.image.save(
+									os.path.basename(event.image.url),
+									File(io.BytesIO(encodedImage.tobytes()))
+								)
+								if pause:
+									event.status = "OPENING"
+								last_photo_save = datetime.datetime.now()
+								prev_frame = gray_frame.copy()
+							else:
+								event.image = None
 						else:
 							event.image = None
+							event.payload = str(numbers_list) + " <> " + str(same_nums)
 						event.save()
 						last_num_save = datetime.datetime.now()
 				logging.warning(f"cnt={cnt}, {frames_boxes_list}, {numbers_list}")

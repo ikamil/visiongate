@@ -32,13 +32,13 @@ def ewelink_on(token: str, dev: str):
     return res
 
 
-def open_close(cam: Camera, do_open: bool = True):
+def open_close(cam: Camera, do_open: bool = True, save_event: bool = True):
     STATUS = "OPEN" if do_open else "CLOSED"
     ACTION = "OPENING" if do_open else "CLOSING"
     WAIT = "CLOSING" if do_open else "OPENING"
     loc = cam.location
 
-    def set_status(status, token, payload):
+    def set_status(status, token, payload, save_event=True):
         loc.status = status
         if token:
             loc.token = token
@@ -50,13 +50,14 @@ def open_close(cam: Camera, do_open: bool = True):
             loc.opened_by = None
         loc.changed = now()
         loc.save()
-        event = Event(location=loc, status=status, owner=loc.owner, payload=payload)
-        event.save()
+        if save_event:
+            event = Event(location=loc, status=status, owner=loc.owner, payload=payload)
+            event.save()
 
     if loc.status not in (STATUS, ACTION) or loc.mode == "AUTOCLOSE":
         if loc.status == WAIT:
             time.sleep(1)
-        set_status(ACTION, None, dict(device=loc.device))
+        set_status(ACTION, None, dict(device=loc.device), save_event=save_event)
         res = ewelink_on(loc.token, loc.device)
         if res["error"]:
             set_status("ERROR", loc.token, res)
