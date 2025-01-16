@@ -151,29 +151,29 @@ def generate(cam: Camera, src, ocr: PaddleOCR, allowed: List[str], is_local: boo
 					same_nums = nums_allowed(numbers_list, prev_numbers, 0.8)
 					empty_num = len(numbers_list) == 1 and numbers_list[0] == "" and last_num_save < datetime.datetime.now() - datetime.timedelta(seconds=10)
 					if empty_num or len(same_nums) == 0 or pause or last_num_save < datetime.datetime.now() - datetime.timedelta(minutes=1):
-						event = Event(location=cam.location, camera=cam, inout=cam.inout, payload=numbers_list, image="img.jpg", owner=cam.owner)
+						event = Event(location=cam.location, camera=cam, inout=cam.inout, payload=str(numbers_list) + " <> " + str(same_nums), image="img.jpg", owner=cam.owner)
+						if pause:
+							event.status = "OPENING"
 						if len(same_nums) == 0 or pause or last_photo_save < datetime.datetime.now() - datetime.timedelta(minutes=10):
 							gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 							if len(prev_frame.shape):
 								diff = np.sum(cv2.subtract(prev_frame, gray_frame) ** 2) / frame.shape[0] / frame.shape[1]
 							else:
 								diff = 100.0
-							event.payload = str(numbers_list) + " => " + str(diff)
-							if diff > prev_frame_diff_min or pause:
+							event.payload = event.payload + " %" + str(round(diff, 2))
+							same_payload = len(same_nums) > 0 and diff <= prev_frame_diff_min/2
+							if diff > prev_frame_diff_min or (pause and not same_payload):
 								(flag, encodedImage) = cv2.imencode(".jpg", frame)
 								event.image.save(
 									os.path.basename(event.image.url),
 									File(io.BytesIO(encodedImage.tobytes()))
 								)
-								if pause:
-									event.status = "OPENING"
 								last_photo_save = datetime.datetime.now()
 								prev_frame = gray_frame.copy()
 							else:
 								event.image = None
 						else:
 							event.image = None
-							event.payload = str(numbers_list) + " <> " + str(same_nums)
 						event.save()
 						last_num_save = datetime.datetime.now()
 				logging.warning(f"cnt={cnt}, {frames_boxes_list}, {numbers_list}")
@@ -219,7 +219,7 @@ def video(request, id: int):
 		return redirect(f"{settings.LOGIN_URL}?next={request.path}")
 	if is_local:
 		from paddleocr import PaddleOCR
-		ocr = PaddleOCR(lang="en")
+		ocr = PaddleOCR(use_angle_cls=False, lang="en")  # отключение распознавания перевёрнутых текстов для скорости
 	else:
 		ocr = None
 	loc = cam.location

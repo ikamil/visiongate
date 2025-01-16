@@ -192,12 +192,12 @@ class CameraAdmin(LocationUserAdmin):
 @admin.register(Event)
 class EventAdmin(ExportMixin, LocationUserAdmin):
     def imagepreview(self, obj):
-        return mark_safe(f'<img src="%s" alt="Фото" width="560px"/>' % obj.image.url)
-    imagepreview.short_description = "Фото"
+        return mark_safe(f'<img src="%s" alt="Фото" width="560px"/>' % ((obj.image.url if obj.image else None) or obj.cloud_url))
+    imagepreview.short_description = "Фото просмотр"
 
-    fields = ["location", "camera", "inout", "status", "created", "payload", "image", "imagepreview"]
+    fields = ["location", "camera", "inout", "status", "created", "payload", "image", "cloud_url", "imagepreview"]
     list_display = ("created", "location", "camera", "inout", "status", "payload")
-    list_filter = (LocationFilter, "status")
+    list_filter = (LocationFilter, "status", ("image", admin.EmptyFieldListFilter ))
     readonly_fields = ("imagepreview",)
     search_fields = ("payload",)
 

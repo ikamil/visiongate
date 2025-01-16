@@ -77,6 +77,7 @@ class Event(models.Model):
     status = models.CharField(verbose_name="Статус", choices=STATUS, max_length=7, blank=True, null=True)
     payload = models.CharField(verbose_name="Информация", max_length=2000, blank=True, null=True)
     image = models.ImageField(verbose_name="Фото", upload_to=imgpath, blank=True, null=True)
+    cloud_url = models.URLField(verbose_name="Фото в облаке", blank=True, null=True)
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.DO_NOTHING, blank=True, null=True, verbose_name="Владелец")
     created = models.DateTimeField(default=now, verbose_name="Дата и время")
     changed = models.DateTimeField(default=now)

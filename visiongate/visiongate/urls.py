@@ -20,6 +20,7 @@ from django.views.static import serve
 from django.http import HttpResponseRedirect, HttpResponse
 from django.views.generic.base import RedirectView
 from main.views import *
+from management.views import *
 
 def home(request):
     return HttpResponseRedirect("/admin")
@@ -38,5 +39,7 @@ urlpatterns = [
     path("close/<int:id>/", gate_open, name="close", kwargs={"do_open": False}),
     path("status/<int:id>/", gate_open, name="status", kwargs={"do_open": None}),
     re_path(r'^uploads/(?P<path>.*)$', serve, {'document_root': settings.MEDIA_ROOT}),
-    path("stream", streaming_view)
+    path("stream", streaming_view),
+    path("webdav/<int:cnt>/", webdav, name="webdav"),
+    path("webdav/", webdav, name="webdav_default"),
 ]
