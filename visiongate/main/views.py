@@ -1,4 +1,5 @@
 import datetime
+import logging
 from difflib import SequenceMatcher
 import numpy as np
 from typing import List
@@ -48,8 +49,8 @@ async def gate_open(request, id: int, do_open: bool):
 	return JsonResponse(res)
 
 
-REPLACE = {"O": "0", "R": "K", ".": "", ",": "", "/": "7", "V": "Y", "|": "", "I": ""}
-INPLACE = {"0": {"4": "A", "X": "K"}, "5,6": {"C": "0", "8": "B", "1": "T", "3": "B", "7": "T"}, "2,3,4": {"B": "8"}}
+REPLACE = {"D": "0", "Q": "0", "O": "0", "R": "K", ".": "", ",": "", "/": "7", "V": "Y", "|": "", "I": "", " ": ""}
+INPLACE = {"0": {"4": "A", "X": "K", "V": "Y", "9": "B", "7": "T", "1": "T"}, "4,5": {"0": "C", "8": "B", "1": "T", "3": "B", "7": "T", "V": "Y", "9": "B"}, "1,2,3": {"B": "8", "A": "4"}}
 CHANGES = {"10": {"7": ""}}
 
 
@@ -98,13 +99,13 @@ def nums_allowed(numbers_list, allowed, sim=1.0) -> List[str]:
 		return [x for x in uni_nums if any([SequenceMatcher(None, x, unify(n)).ratio() >= sim for n in allowed])]
 
 
-def generate(cam: Camera, src, ocr: PaddleOCR, allowed: List[str], is_local: bool):
+def generate(cam1: Camera, cam2: Camera, src1: str, src2: str, ocr: PaddleOCR, allowed: List[str], is_local: bool):
 	# loop over frames from the output stream
-	num_box = 20
+	num_box = 28
 	batch = settings.ONNX_BATCH_SIZE
-	num_ocr = num_box * batch
-	num_stream = 3
 	cnt = 0
+	cam_in_bad = 0
+	cam_out_bad = 0
 	after_pause = 0
 	pause = False
 	again = 200
@@ -113,34 +114,92 @@ def generate(cam: Camera, src, ocr: PaddleOCR, allowed: List[str], is_local: boo
 	last_photo_save = datetime.datetime.now() - datetime.timedelta(hours=1)
 	last_cam_frame = datetime.datetime.now() - datetime.timedelta(hours=1)
 	last_cam_msecs = 500
+	non_image_minutes = 10
 	cam_started = datetime.datetime.now()
-	cap = cv2.VideoCapture(src)
-	numbers_list = []
+	cap1 = cv2.VideoCapture(src1)
+	cap2 = cv2.VideoCapture(src2)
 	prev_numbers = []
-	frames = []
+	frames1 = []
+	frames2 = []
 	prefix = (str(allowed) if len(allowed) == 1 else str(len(allowed))) + ": "
-	prev_frame: cv2.typing.MatLike = np.ndarray([])
+	prev_frame_filename = f"prev_frame_{cam1.pk}.npy"
+	if os.path.exists(prev_frame_filename):
+		prev_frame = np.load(prev_frame_filename)
+	else:
+		prev_frame: cv2.typing.MatLike = np.ndarray([])
 	prev_frame_diff_min = 11
-	while cap.isOpened():
-		ret, frame = cap.read()
-		if not ret:
+	while cap1.isOpened() or cap2.isOpened():
+		cam_cnt = 0
+		cam_in = False
+		cam_out = False
+		frame1 = np.ndarray([])
+		frame2 = np.ndarray([])
+		if cap1.isOpened():
+			cam_in, frame1 = cap1.read()
+			if cam_in:
+				cam_cnt += 1
+				cam_in_bad = 0
+			else:
+				cam_in_bad += 1
+		if cap2.isOpened():
+			cam_out, frame2 = cap2.read()
+			if cam_out:
+				cam_cnt += 1
+				cam_out_bad = 0
+			else:
+				cam_out_bad += 1
+		if cam_cnt == 0 or cam_out_bad > 10 or cam_in_bad > 10:
 			break
-			# encode the frame in JPEG format
-			# ensure the frame was successfully encoded
 		cnt += 1
 		if pause:
 			after_pause += 1
 			if after_pause % again == 0:
 				pause = False
-		if is_local and cnt % num_box == 0 and not pause:
-			frames.append(frame)
-			if len(frames) == batch:
-				frames_boxes_list = boxes(frames)
-				nums = []
-				for boxes_list, frame_ in zip(frames_boxes_list, frames):
-					nums.extend(numbers(frame_, boxes_list, ocr))
-				numbers_list = list(set(nums))
-				allow_nums = nums_allowed(numbers_list, allowed)
+		if is_local and cnt % (num_box * (cam_cnt / 2)) == 0 and not pause:
+			if cam_in:
+				frames1.append(frame1)
+			if cam_out:
+				frames2.append(frame2)
+			if len(frames1 + frames2) == batch:
+				frames_boxes_list = boxes(frames1 + frames2)
+				frames_boxes_list1 = frames_boxes_list[:len(frames1)]
+				frames_boxes_list2 = frames_boxes_list[len(frames1):]
+				nums1 = []
+				nums2 = []
+				for boxes_list, frame_ in zip(frames_boxes_list1, frames1):
+					nums1.extend(numbers(frame_, boxes_list, ocr))
+					# logging.warning(f"boxes_list1={boxes_list} frame1_={frame_.shape} nums1={nums1}")
+				for boxes_list, frame_ in zip(frames_boxes_list2, frames2):
+					nums2.extend(numbers(frame_, boxes_list, ocr))
+					# logging.warning(f"boxes_list2={boxes_list} frame2_={frame_.shape} nums2={nums2}")
+				numbers_list1 = list(set(nums1))
+				numbers_list2 = list(set(nums2))
+				allow_nums1 = nums_allowed(numbers_list1, allowed)
+				allow_nums2 = nums_allowed(numbers_list2, allowed)
+				if len(allow_nums1) > 0:
+					cam = cam1
+					allow_nums = allow_nums1
+					numbers_list = numbers_list1
+					frame = frame1
+				elif len(allow_nums2) > 0:
+					cam = cam2
+					allow_nums = allow_nums2
+					numbers_list = numbers_list2
+					frame = frame2
+				else:
+					allow_nums = []
+					if len(numbers_list1) > 0 and any([x for x in numbers_list1]):
+						numbers_list = numbers_list1
+						cam = cam1
+						frame = frame1
+					elif len(numbers_list2) > 0 and any([x for x in numbers_list2]):
+						numbers_list = numbers_list2
+						cam = cam2
+						frame = frame2
+					else:
+						numbers_list = numbers_list1 + numbers_list2
+						cam = cam2 if len(numbers_list2) > 0 else cam1
+						frame = frame2 if len(numbers_list2) > 0 else frame1
 				if len(allow_nums) > 0:
 					pause = True
 					after_pause = 0
@@ -149,12 +208,12 @@ def generate(cam: Camera, src, ocr: PaddleOCR, allowed: List[str], is_local: boo
 						last_open = datetime.datetime.now()
 				if len(numbers_list) > 0:
 					same_nums = nums_allowed(numbers_list, prev_numbers, 0.8)
-					empty_num = len(numbers_list) == 1 and numbers_list[0] == "" and last_num_save < datetime.datetime.now() - datetime.timedelta(seconds=10)
-					if empty_num or len(same_nums) == 0 or pause or last_num_save < datetime.datetime.now() - datetime.timedelta(minutes=1):
-						event = Event(location=cam.location, camera=cam, inout=cam.inout, payload=str(numbers_list) + " <> " + str(same_nums), image="img.jpg", owner=cam.owner)
+					empty_num = not any([len(x.strip()) > 6 for x in numbers_list])
+					if (empty_num and last_num_save < datetime.datetime.now() - datetime.timedelta(minutes=1)) or (len(same_nums) == 0 and not empty_num and last_num_save < datetime.datetime.now() - datetime.timedelta(seconds=10)) or pause:
+						event = Event(location=cam.location, camera=cam, inout=cam.inout, payload=f"{numbers_list} <> {same_nums} [{cnt}.{len(frames1)}.{len(frames2)}]", image="img.jpg", owner=cam.owner)
 						if pause:
 							event.status = "OPENING"
-						if len(same_nums) == 0 or pause or last_photo_save < datetime.datetime.now() - datetime.timedelta(minutes=10):
+						if len(same_nums) == 0 or pause or (any([x for x in numbers_list]) and last_photo_save < datetime.datetime.now() - datetime.timedelta(minutes=non_image_minutes)):
 							gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 							if len(prev_frame.shape):
 								diff = np.sum(cv2.subtract(prev_frame, gray_frame) ** 2) / frame.shape[0] / frame.shape[1]
@@ -162,7 +221,8 @@ def generate(cam: Camera, src, ocr: PaddleOCR, allowed: List[str], is_local: boo
 								diff = 100.0
 							event.payload = event.payload + " %" + str(round(diff, 2))
 							same_payload = len(same_nums) > 0 and diff <= prev_frame_diff_min/2
-							if diff > prev_frame_diff_min or (pause and not same_payload):
+							periods_non_image = max(min((datetime.datetime.now() - last_photo_save).seconds // 60 // non_image_minutes, 3), 1)
+							if diff > (prev_frame_diff_min * ((3 / periods_non_image) if empty_num else 1)) or (pause and not same_payload):
 								(flag, encodedImage) = cv2.imencode(".jpg", frame)
 								event.image.save(
 									os.path.basename(event.image.url),
@@ -170,18 +230,20 @@ def generate(cam: Camera, src, ocr: PaddleOCR, allowed: List[str], is_local: boo
 								)
 								last_photo_save = datetime.datetime.now()
 								prev_frame = gray_frame.copy()
+								np.save(prev_frame_filename, prev_frame)
 							else:
 								event.image = None
 						else:
 							event.image = None
 						event.save()
+						prev_numbers = numbers_list
 						last_num_save = datetime.datetime.now()
-				logging.warning(f"cnt={cnt}, {frames_boxes_list}, {numbers_list}")
-				frames = []
-				prev_numbers = numbers_list
+				logging.warning(f"cnt={cnt}, frames_boxes_list1={frames_boxes_list1}, frames_boxes_list2={frames_boxes_list2}, numbers_list1={numbers_list1}, numbers_list2={numbers_list2}")
+				frames1 = []
+				frames2 = []
 		if not is_local:
 			if last_cam_frame < datetime.datetime.now() - datetime.timedelta(milliseconds=last_cam_msecs):
-				frame = cv2.resize(frame, (590, 290), interpolation=cv2.INTER_LINEAR)
+				frame = cv2.resize(frame1, (590, 290), interpolation=cv2.INTER_LINEAR)
 				# frame = cv2.putText(frame, prefix + (" ! " if pause else "") + numbers_list.__str__(), (15, 35), cv2.FONT_HERSHEY_SIMPLEX,	fontScale=1, color=(255, 100, 0), thickness=2, lineType=cv2.LINE_AA)
 				(flag, encodedImage) = cv2.imencode(".jpg", frame)
 				jpeg_bytes = encodedImage.tobytes()
@@ -213,27 +275,33 @@ def video(request, id: int):
 		return redirect(f"{settings.LOGIN_URL}?next={request.path}")
 	if not request.user.is_superuser and not is_local:
 		cam = Camera.objects.get(Q(id=id) & Q(owner_id=request.user.id))
+		cam1 = Camera.objects.get(Q(location_id=cam.location_id) & Q(inout="IN") & Q(owner_id=request.user.id))
+		cam2 = Camera.objects.get(Q(location_id=id) & Q(inout="OUT") & Q(owner_id=request.user.id))
 	else:
 		cam = Camera.objects.get(Q(id=id))
-	if not cam:
+		cam1 = Camera.objects.get(Q(location_id=cam.location_id) & Q(inout="IN"))
+		cam2 = Camera.objects.get(Q(location_id=cam.location_id) & Q(inout="OUT"))
+	if not cam1 and not cam2:
 		return redirect(f"{settings.LOGIN_URL}?next={request.path}")
 	if is_local:
 		from paddleocr import PaddleOCR
 		ocr = PaddleOCR(use_angle_cls=False, lang="en")  # отключение распознавания перевёрнутых текстов для скорости
 	else:
 		ocr = None
-	loc = cam.location
+		cam1 = cam
+	loc = cam1.location
 	logging.warning(f"ocr loaded cam={loc}")
 	if loc.allowed:
 		allowed = loc.allowed.replace("\r", "").split("\n")
 		allowed = [x.strip().upper() for x in allowed]
 	else:
 		allowed = []
-	src = cam.url or cam.sample.path
+	src1 = cam1.url or cam1.sample.path
+	src2 = cam2.url or cam2.sample.path
 	token = ewelink_auth()
 	loc.token = token
 	loc.save()
-	res = StreamingHttpResponse(generate(cam, src, ocr, allowed, is_local), content_type = "multipart/x-mixed-replace; boundary=frame")
+	res = StreamingHttpResponse(generate(cam1, cam2, src1, src2, ocr, allowed, is_local), content_type = "multipart/x-mixed-replace; boundary=frame")
 	# res["Cache-Control"] = "no-cache"  # prevent client cache
 	# res["X-Accel-Buffering"] = "no"  # Allow Stream over NGINX server
 	return res

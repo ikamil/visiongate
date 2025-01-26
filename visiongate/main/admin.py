@@ -159,8 +159,8 @@ class CameraAdmin(LocationUserAdmin):
     def videopreview(self, obj):
         return mark_safe(f'<video controls width="450"><source src="{obj.sample.url}" type="video/mp4"/></video>' if not obj.url else """
         <div id="vid"><div id="click" style="background-color: #EBEBEB; cursor: pointer" onClick=
-        "let str = document.getElementById('stream'); str.src = ''; str.src = 'https://visiongate.ru/video/%s/'; redraw();">     
-        <img id="stream" src="https://visiongate.ru/video/%s" alt="Просмотр видео"/><strong id="strong"></strong></div>
+        "let str = document.getElementById('stream'); str.src = ''; str.src = '/video/%s/'; redraw();">     
+        <img id="stream" src="/video/%s" alt="Просмотр видео"/><strong id="strong"></strong></div>
         <script>let clk = document.getElementById('click'); let stg = document.getElementById('strong');
         function redraw(){stg.innerText=''; setTimeout(()=>{stg.innerText='Перезапустить';}, 31000);};redraw();</script></div>""" % (obj.id, obj.id))
     videopreview.short_description = "Просмотр видео"
@@ -168,7 +168,7 @@ class CameraAdmin(LocationUserAdmin):
     def controlpreview(self, obj):
         return mark_safe("""<div id="iframe"><div id="click" style="background-color: #EBEBEB; cursor: pointer" 
         onClick="var frm = document.getElementById('iframe'); let ifrm = document.getElementById('ifrm'); if (ifrm) ifrm.remove(); var fr = document.createElement('iframe');
-        fr.id = 'ifrm'; fr.src = 'https://visiongate.ru/video/%s/';  fr.width = 600; fr.height = 300; fr.onLoad = function () {document.getElementById('click').click();}
+        fr.id = 'ifrm'; fr.src = '/video/%s/';  fr.width = 600; fr.height = 300; fr.onLoad = function () {document.getElementById('click').click();}
         frm.appendChild(fr);"><strong>Включить модель детекции образов.</strong>"!" - обнаружено</div></div>""" % obj.id)
     controlpreview.short_description = "Просмотр контроля"
 
@@ -192,12 +192,12 @@ class CameraAdmin(LocationUserAdmin):
 @admin.register(Event)
 class EventAdmin(ExportMixin, LocationUserAdmin):
     def imagepreview(self, obj):
-        return mark_safe(f'<img src="%s" alt="Фото" width="560px"/>' % ((obj.image.url if obj.image else None) or obj.cloud_url))
+        return mark_safe(f'<img src="%s" alt="Фото" width="560px"/>' % ((obj.image.url if obj.image else "") or obj.cloud_url))
     imagepreview.short_description = "Фото просмотр"
 
     fields = ["location", "camera", "inout", "status", "created", "payload", "image", "cloud_url", "imagepreview"]
-    list_display = ("created", "location", "camera", "inout", "status", "payload")
-    list_filter = (LocationFilter, "status", ("image", admin.EmptyFieldListFilter ))
+    list_display = ("created", "payload", "inout", "location", "camera", "status")
+    list_filter = (LocationFilter, "inout", "status", ("image", admin.EmptyFieldListFilter ))
     readonly_fields = ("imagepreview",)
     search_fields = ("payload",)
 

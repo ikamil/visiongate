@@ -40,8 +40,10 @@ async def webdav(request, cnt: int = 10):
 	prev_url = ""
 	events = await get_events()
 	if len(events) == 0:
-		resp = [datetime.datetime.now().strftime(settings.DATETIME_FORMAT) + " no old events" + "\n"]
+		logging.warning("No events found")
+		resp = 600
 	for event in events[:cnt]:
+		resp = 1
 		eid = event["pk"]
 		event_date: datetime = event["changed"]
 		img = settings.MEDIA_ROOT + "/" + event["image"]
@@ -61,17 +63,17 @@ async def webdav(request, cnt: int = 10):
 			url = f"{date_path}/{file}"
 			cloud_url = f"{CLOUD_SHARE}/{date_dir}/{file}"
 			headers = {"Authorization": f"Basic {WEBDAV_AUTH}"}
-			resp.append(str(event) + " " + str(diff) + "\n")
+			logging.warning(str(event) + " " + str(diff))
 			dir_url = f"{base}"
 			for pth in date_dir.split("/"):
 				dir_url = f"{dir_url}/{pth}"
 				if dir_url in created_dirs:
 					continue
 				res = requests.request("MKCOL", dir_url, headers=headers)
-				resp.append(dir_url + res.text + "  => " + str(res.status_code) + "\n")
+				logging.warning(dir_url + res.text + "  => " + str(res.status_code))
 				created_dirs.add(dir_url)
 			res = requests.put(url, open(img, "rb").read(), headers=headers)
-			resp.append(url + res.text + "  => " + str(res.status_code) + "\n")
+			logging.warning(url + res.text + "  => " + str(res.status_code))
 			logging.warning(f"Cloud {url} result {res.text} with status={res.status_code}")
 			prev_cloud_url = cloud_url
 			prev_url = url
