@@ -1,1 +1,1 @@
-while :; do curl http://localhost:8002/webdav/3/; sleep 600; done
+while :; do echo "Starting webdav"; SECS=$(curl -s http://localhost:8002/webdav/10/); echo "Sleeping $SECS"; sleep $SECS; done
