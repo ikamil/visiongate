@@ -33,9 +33,9 @@ async def webdav(request, cnt: int = 10):
 
 	@sync_to_async
 	def get_events():
-		records = Event.objects.raw("""select id, image, changed from main_event 
-		where nullif(trim(image), '') is not null and changed < (current_timestamp - interval '10 days') 
-		order by id limit %s + 1""", [cnt])
+		records = Event.objects.raw("""select id, image, status, changed from main_event
+		where nullif(trim(image), '') is not null and changed < (current_timestamp - interval '10 days')
+		order by id limit  %s + 1""", [cnt])
 		columns = records.columns
 		result = []
 		for record in records:
@@ -76,7 +76,8 @@ async def webdav(request, cnt: int = 10):
 		if os.path.exists(img) and diff > prev_frame_diff_min:
 			year, month, day = event_date.year, event_date.month, event_date.day
 			base = "https://webdav.cloud.mail.ru/___big/dev/uploads/visiongate"
-			date_dir = f"{year}/{month}/{day}"
+			path_type = (event["status"].lower() + "/") if event["status"] and event["status"].strip() else ""
+			date_dir = f"{path_type}{year}/{month}/{day}"
 			date_path = f"{base}/{date_dir}"
 			url = f"{date_path}/{file}"
 			cloud_url = f"{CLOUD_SHARE}/{date_dir}/{file}"
@@ -88,7 +89,7 @@ async def webdav(request, cnt: int = 10):
 				if dir_url in created_dirs:
 					continue
 				res = requests.request("MKCOL", dir_url, headers=headers)
-				logging.warning(dir_url + res.text + "  => " + str(res.status_code))
+				logging.warning(dir_url + "  => "  + res.text + ": " + str(res.status_code))
 				created_dirs.add(dir_url)
 			res = requests.put(url, open(img, "rb").read(), headers=headers)
 			logging.warning(url + res.text + "  => " + str(res.status_code))
