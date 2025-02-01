@@ -1,13 +1,10 @@
 import asyncio
-import logging
 
 from asgiref.sync import sync_to_async
-from django.http import HttpResponse
+from django.http import HttpResponse, HttpRequest
 from django.shortcuts import redirect
-from django.db.models import Q
 from main.ewelink import *
 from main.views import get_client_ip
-from django.forms.models import model_to_dict
 from main.models import Event
 import datetime
 import os
@@ -17,12 +14,18 @@ import requests
 
 
 async def webdav(request, cnt: int = 10):
-	if not get_client_ip(request):
+	@sync_to_async
+	def get_user_from_request(request: HttpRequest):
+		return request.user if bool(request.user) else None
+	user = await get_user_from_request(request)
+	is_local = get_client_ip(request)
+	if (not user or not user.is_authenticated) and not is_local:
 		return redirect(f"{settings.LOGIN_URL}?next={request.path}")
 
 	@sync_to_async
 	def do(id: int, url: str, img: str):
-		os.unlink(img)
+		if os.path.exists(img):
+			os.unlink(img)
 		event = Event.objects.get(id=id)
 		event.cloud_url = url
 		event.image = None
@@ -30,11 +33,19 @@ async def webdav(request, cnt: int = 10):
 
 	@sync_to_async
 	def get_events():
-		return list(Event.objects.filter(~Q(image="")&Q(image__isnull=False) & Q(deleted__isnull=True) &Q(changed__lt=datetime.datetime.now()-datetime.timedelta(days=10))).order_by("pk")[:cnt + 1].values("pk", "image", "changed"))
+		records = Event.objects.raw("""select id, image, changed from main_event 
+		where nullif(trim(image), '') is not null and changed < (current_timestamp - interval '10 days') 
+		order by id limit %s + 1""", [cnt])
+		columns = records.columns
+		result = []
+		for record in records:
+			result.append({col: getattr(record, col) for col in columns})
+		return result
 
-	resp = []
 	created_dirs = set()
 	prev_frame: cv2.typing.MatLike = np.ndarray([])
+	gray_frame: cv2.typing.MatLike = np.ndarray([])
+	frame: cv2.typing.MatLike = np.ndarray([])
 	prev_frame_diff_min = 2
 	prev_cloud_url = ""
 	prev_url = ""
@@ -43,19 +54,26 @@ async def webdav(request, cnt: int = 10):
 		logging.warning("No events found")
 		resp = 600
 	for event in events[:cnt]:
+		print(event)
 		resp = 1
-		eid = event["pk"]
+		eid = event["id"]
 		event_date: datetime = event["changed"]
-		img = settings.MEDIA_ROOT + "/" + event["image"]
+		img = settings.MEDIA_ROOT + "/" + str(event["image"])
 		file = img.split("/")[-1]
-		frame = cv2.imread(img)
-		gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-		if len(prev_frame.shape):
+		if os.path.exists(img):
+			frame = cv2.imread(img)
+			try:
+				gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+			except Exception as _:
+				pass
+		else:
+			logging.warning(f"Image {img} not exists, skipping")
+		if len(prev_frame.shape) and len(gray_frame.shape) and len(frame.shape):
 			diff = np.sum(cv2.subtract(prev_frame, gray_frame) ** 2) / frame.shape[0] / frame.shape[1]
 		else:
 			diff = 100.0
 		logging.warning(f"Processing Event {event} with diff {diff}")
-		if diff > prev_frame_diff_min:
+		if os.path.exists(img) and diff > prev_frame_diff_min:
 			year, month, day = event_date.year, event_date.month, event_date.day
 			base = "https://webdav.cloud.mail.ru/___big/dev/uploads/visiongate"
 			date_dir = f"{year}/{month}/{day}"
