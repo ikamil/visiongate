@@ -32,7 +32,7 @@ def ewelink_on(token: str, dev: str):
     return res
 
 
-def open_close(cam: Camera, do_open: bool = True, save_event: bool = True):
+def open_close(cam: Camera, do_open: bool = True, save_event: bool = True, user: settings.AUTH_USER_MODEL = None):
     STATUS = "OPEN" if do_open else "CLOSED"
     ACTION = "OPENING" if do_open else "CLOSING"
     WAIT = "CLOSING" if do_open else "OPENING"
@@ -51,7 +51,7 @@ def open_close(cam: Camera, do_open: bool = True, save_event: bool = True):
         loc.changed = now()
         loc.save()
         if save_event:
-            event = Event(location=loc, status=status, owner=loc.owner, payload=payload)
+            event = Event(location=loc, status=status, owner=loc.owner, payload=payload, user=user)
             event.save()
 
     if loc.status not in (STATUS, ACTION) or loc.mode == "AUTOCLOSE":

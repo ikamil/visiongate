@@ -39,7 +39,7 @@ async def gate_open(request, id: int, do_open: bool):
 
 	@sync_to_async
 	def do():
-		open_close(cam, do_open)
+		open_close(cam, do_open, user=user)
 
 	if do_open is not None:
 		await do()

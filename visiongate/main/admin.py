@@ -195,8 +195,8 @@ class EventAdmin(ExportMixin, LocationUserAdmin):
         return mark_safe(f'<img src="%s" alt="Фото" width="560px"/>' % ((obj.image.url if obj.image else "") or obj.cloud_url))
     imagepreview.short_description = "Фото просмотр"
 
-    fields = ["location", "camera", "inout", "status", "created", "payload", "image", "cloud_url", "imagepreview"]
-    list_display = ("created", "payload", "inout", "location", "camera", "status")
+    fields = ["location", "camera", "inout", "status", "created", "payload", "image", "cloud_url", "imagepreview", "user"]
+    list_display = ("created", "payload", "inout", "location", "camera", "status", "user")
     list_filter = (LocationFilter, "inout", "status", ("image", admin.EmptyFieldListFilter ))
     readonly_fields = ("imagepreview",)
     search_fields = ("payload",)
