@@ -50,7 +50,10 @@ async def gate_open(request, id: int, do_open: bool):
 
 
 REPLACE = {"D": "0", "Q": "0", "O": "0", "R": "K", ".": "", ",": "", "/": "7", "V": "Y", "|": "", "I": "", " ": ""}
-INPLACE = {"0": {"4": "A", "X": "K", "V": "Y", "9": "B", "7": "T", "1": "T"}, "4,5": {"0": "C", "8": "B", "1": "T", "3": "B", "7": "T", "V": "Y", "9": "B"}, "1,2,3": {"B": "8", "A": "4"}}
+INPLACE = {"0": {"4": "A", "X": "K", "V": "Y", "9": "B", "7": "T", "1": "T"},
+		   "4,5": {"0": "C", "8": "B", "1": "T", "3": "B", "7": "T", "V": "Y", "X": "K", "9": "B"},
+		   "1,2,3": {"B": "8", "A": "4"},
+		   "6": {"M": "11"}}
 CHANGES = {"10": {"7": ""}}
 
 
@@ -115,6 +118,7 @@ def generate(cam1: Camera, cam2: Camera, src1: str, src2: str, ocr: PaddleOCR, a
 	last_cam_frame = datetime.datetime.now() - datetime.timedelta(hours=1)
 	last_cam_msecs = 500
 	non_image_minutes = 10
+	same_image_minutes = 90
 	cam_started = datetime.datetime.now()
 	cap1 = cv2.VideoCapture(src1)
 	cap2 = cv2.VideoCapture(src2)
@@ -134,15 +138,24 @@ def generate(cam1: Camera, cam2: Camera, src1: str, src2: str, ocr: PaddleOCR, a
 		cam_out = False
 		frame1 = np.ndarray([])
 		frame2 = np.ndarray([])
+		local_read = is_local and cnt % (num_box * (sum([np.sign(len(x)) for x in [src1, src2]]) / 2)) == 0 and not pause
+		last_frame_read = last_cam_frame < datetime.datetime.now() - datetime.timedelta(milliseconds=last_cam_msecs)
+		need_read = local_read or last_frame_read
 		if cap1.isOpened():
-			cam_in, frame1 = cap1.read()
+			if need_read:
+				cam_in, frame1 = cap1.read()
+			else:
+				cam_in = cap1.grab()
 			if cam_in:
 				cam_cnt += 1
 				cam_in_bad = 0
 			else:
 				cam_in_bad += 1
 		if cap2.isOpened():
-			cam_out, frame2 = cap2.read()
+			if need_read:
+				cam_out, frame2 = cap2.read()
+			else:
+				cam_out = cap2.grab()
 			if cam_out:
 				cam_cnt += 1
 				cam_out_bad = 0
@@ -155,7 +168,7 @@ def generate(cam1: Camera, cam2: Camera, src1: str, src2: str, ocr: PaddleOCR, a
 			after_pause += 1
 			if after_pause % again == 0:
 				pause = False
-		if is_local and cnt % (num_box * (cam_cnt / 2)) == 0 and not pause:
+		if local_read:
 			if cam_in:
 				frames1.append(frame1)
 			if cam_out:
@@ -220,7 +233,7 @@ def generate(cam1: Camera, cam2: Camera, src1: str, src2: str, ocr: PaddleOCR, a
 							else:
 								diff = 100.0
 							event.payload = event.payload + " %" + str(round(diff, 2))
-							same_payload = len(same_nums) > 0 and diff <= prev_frame_diff_min/2
+							same_payload = len(same_nums) > 0 and diff <= prev_frame_diff_min/2 and last_photo_save > datetime.datetime.now() - datetime.timedelta(minutes=same_image_minutes)
 							periods_non_image = max(min((datetime.datetime.now() - last_photo_save).seconds // 60 // non_image_minutes, 3), 1)
 							if diff > (prev_frame_diff_min * ((3 / periods_non_image) if empty_num else 1)) or (pause and not same_payload):
 								(flag, encodedImage) = cv2.imencode(".jpg", frame)
@@ -242,7 +255,7 @@ def generate(cam1: Camera, cam2: Camera, src1: str, src2: str, ocr: PaddleOCR, a
 				frames1 = []
 				frames2 = []
 		if not is_local:
-			if last_cam_frame < datetime.datetime.now() - datetime.timedelta(milliseconds=last_cam_msecs):
+			if last_frame_read:
 				frame = cv2.resize(frame1, (590, 290), interpolation=cv2.INTER_LINEAR)
 				# frame = cv2.putText(frame, prefix + (" ! " if pause else "") + numbers_list.__str__(), (15, 35), cv2.FONT_HERSHEY_SIMPLEX,	fontScale=1, color=(255, 100, 0), thickness=2, lineType=cv2.LINE_AA)
 				(flag, encodedImage) = cv2.imencode(".jpg", frame)
@@ -250,7 +263,7 @@ def generate(cam1: Camera, cam2: Camera, src1: str, src2: str, ocr: PaddleOCR, a
 				# yield the output frame in the byte format
 				yield(b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
 				last_cam_frame = datetime.datetime.now()
-				time.sleep(last_cam_msecs * 0.7 / 1000)
+				# time.sleep(last_cam_msecs * 0.7 / 1000)
 			else:
 				yield
 			if cam_started < datetime.datetime.now() - datetime.timedelta(seconds=30):
