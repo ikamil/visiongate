@@ -99,7 +99,10 @@ def nums_allowed(numbers_list, allowed, sim=1.0) -> List[str]:
 	if sim == 1.0:
 		return [x for x in uni_nums if x in [unify(n) for n in allowed]]
 	else:
-		return [x for x in uni_nums if any([SequenceMatcher(None, x, unify(n)).ratio() >= sim for n in allowed])]
+		res = [x for x in uni_nums if any([SequenceMatcher(None, x, unify(n)).ratio() >= sim for n in allowed])]
+		if not len(res):
+			res = [x for x in uni_nums if any([y[1:3] == x[1:3] for y in allowed])]
+		return res
 
 
 def generate(cam1: Camera, cam2: Camera, src1: str, src2: str, ocr: PaddleOCR, allowed: List[str], is_local: bool):
@@ -249,7 +252,8 @@ def generate(cam1: Camera, cam2: Camera, src1: str, src2: str, ocr: PaddleOCR, a
 						else:
 							event.image = None
 						event.save()
-						prev_numbers = numbers_list
+						if not empty_num:
+							prev_numbers = numbers_list
 						last_num_save = datetime.datetime.now()
 				logging.warning(f"cnt={cnt}, frames_boxes_list1={frames_boxes_list1}, frames_boxes_list2={frames_boxes_list2}, numbers_list1={numbers_list1}, numbers_list2={numbers_list2}")
 				frames1 = []
