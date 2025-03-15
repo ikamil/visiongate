@@ -16,6 +16,78 @@ from django.forms.models import model_to_dict
 from management.models import LocationUser
 import os
 import io
+import threading
+from threading import Lock
+
+
+class Capture:
+	last_frame = None
+	frames = []
+	last_ready = None
+	url = ""
+	lock = Lock()
+	paused = False
+	stopped = False
+
+	def __init__(self, cam_id: int, rtsp_link: str, gap: int, batch: int = 1):
+		self.url = rtsp_link or ""
+		self.gap = gap
+		self.cam_id = cam_id
+		self.batch = batch
+		self.capture = cv2.VideoCapture(self.url)
+		self.stopped = not self.capture.isOpened()
+		self.thread = threading.Thread(target=self.rtsp_cam_buffer, name=f"rtsp_read_thread_{self.cam_id}")
+		self.thread.daemon = True
+		self.thread.start()
+		logging.warning(f"Started rtsp_read_thread_{cam_id} for {self.url} with status {self.capture.isOpened()}")
+
+	def rtsp_cam_buffer(self):
+		cnt = -1
+		bad = 0
+		_gap = max(1, self.gap)
+		while not self.stopped:
+			with self.lock:
+				cnt += 1
+				if self.capture.isOpened():
+					bad = 0
+					if cnt % _gap > 0 or self.paused:
+						self.last_ready = self.capture.grab()
+					else:
+						self.last_ready, self.last_frame = self.capture.read()
+						if self.last_ready and self.batch > 1:
+							if len(self.frames) == self.batch:
+								self.frames.pop(0)
+							self.frames.append(self.last_frame)
+				else:
+					bad += 1
+					self.last_ready = None
+					if bad > 100:
+						self.stopped = True
+
+
+	def get_frames(self):
+		if self.last_ready is not None and self.last_frame is not None:
+			if self.batch > 1:
+				_frames = []
+				for frame in self.frames:
+					_frames.append(frame.copy())
+				return self.last_ready, _frames.copy()
+			else:
+				return self.last_ready, [self.last_frame.copy()]
+		else:
+			return self.last_ready, []
+
+	def get_frame(self):
+		if self.last_ready is not None and self.last_frame is not None:
+			return self.last_ready, self.last_frame.copy()
+		else:
+			return self.last_ready, np.array([])
+
+	def stop(self):
+		self.stopped = True
+		self.capture.release()
+		self.thread.join()
+		logging.warning(f"Stopped rtsp_read_thread_{self.cam_id} for {self.url} with status {self.capture.isOpened()}")
 
 
 async def gate_open(request, id: int, do_open: bool):
@@ -49,12 +121,13 @@ async def gate_open(request, id: int, do_open: bool):
 	return JsonResponse(res)
 
 
-REPLACE = {"D": "0", "Q": "0", "O": "0", "R": "K", ".": "", ",": "", "/": "7", "V": "Y", "|": "", "I": "", " ": ""}
+REPLACE = {"D": "0", "Q": "0", "O": "0", "R": "K", ".": "", ",": "", "V": "Y", "|": "", "I": "", " ": ""}
 INPLACE = {"0": {"4": "A", "X": "K", "V": "Y", "9": "B", "7": "T", "1": "T"},
-		   "4,5": {"0": "C", "8": "B", "1": "T", "3": "B", "7": "T", "V": "Y", "X": "K", "9": "B"},
-		   "1,2,3": {"B": "8", "A": "4"},
-		   "6": {"M": "11"}}
-CHANGES = {"10": {"7": ""}}
+           "4,5": {"0": "C", "8": "B", "1": "T", "3": "B", "7": "T", "V": "Y", "X": "K", "9": "B"},
+           "1,2,3": {"B": "8", "A": "4"},
+           "6": {"M": "11"}}
+CHANGES = {"10": {"6": ""}}
+REPLACE2 = {"/": "7",}
 
 
 def nums_allowed(numbers_list, allowed, sim=1.0) -> List[str]:
@@ -82,6 +155,8 @@ def nums_allowed(numbers_list, allowed, sim=1.0) -> List[str]:
 							i = int(ii)
 							if len(res) > i:
 								res = change(res, i, v)
+		for r, v in REPLACE2.items():
+			res = res.replace(r, v)
 		return res
 
 	if (len(allowed) == 1 and allowed[0] == "") or (len(numbers_list) == 1 and numbers_list[0] == ""):
@@ -105,26 +180,22 @@ def nums_allowed(numbers_list, allowed, sim=1.0) -> List[str]:
 		return res
 
 
-def generate(cam1: Camera, cam2: Camera, src1: str, src2: str, ocr: PaddleOCR, allowed: List[str], is_local: bool):
+def generate(cam1: Camera, cam2: Camera, src1: Capture, src2: Capture, ocr: PaddleOCR, allowed: List[str], is_preview: bool):
 	# loop over frames from the output stream
-	num_box = 28
 	batch = settings.ONNX_BATCH_SIZE
 	cnt = 0
 	cam_in_bad = 0
 	cam_out_bad = 0
-	after_pause = 0
 	pause = False
-	again = 200
 	last_open = datetime.datetime.now() - datetime.timedelta(hours=1)
 	last_num_save = datetime.datetime.now() - datetime.timedelta(hours=1)
 	last_photo_save = datetime.datetime.now() - datetime.timedelta(hours=1)
 	last_cam_frame = datetime.datetime.now() - datetime.timedelta(hours=1)
-	last_cam_msecs = 500
+	last_processing = datetime.datetime.now() - datetime.timedelta(hours=1)
+	sleep_msecs = 500
+	pause_secs = 9
 	non_image_minutes = 10
 	same_image_minutes = 90
-	cam_started = datetime.datetime.now()
-	cap1 = cv2.VideoCapture(src1)
-	cap2 = cv2.VideoCapture(src2)
 	prev_numbers = []
 	frames1 = []
 	frames2 = []
@@ -135,48 +206,38 @@ def generate(cam1: Camera, cam2: Camera, src1: str, src2: str, ocr: PaddleOCR, a
 	else:
 		prev_frame: cv2.typing.MatLike = np.ndarray([])
 	prev_frame_diff_min = 11
-	while cap1.isOpened() or cap2.isOpened():
-		cam_cnt = 0
-		cam_in = False
-		cam_out = False
-		frame1 = np.ndarray([])
-		frame2 = np.ndarray([])
-		local_read = is_local and cnt % (num_box * (sum([np.sign(len(x)) for x in [src1, src2]]) / 2)) == 0 and not pause
-		last_frame_read = last_cam_frame < datetime.datetime.now() - datetime.timedelta(milliseconds=last_cam_msecs)
-		need_read = local_read or last_frame_read
-		if cap1.isOpened():
-			if need_read:
-				cam_in, frame1 = cap1.read()
-			else:
-				cam_in = cap1.grab()
+	try:
+		while True:
+			cam_cnt = 0
+			cam_in, frame1 = src1.get_frame()
+			cam_out, frame2 = src2.get_frame()
+			if cam_in:
+				frames1.append(frame1)
+			if cam_out:
+				frames2.append(frame2)
 			if cam_in:
 				cam_cnt += 1
 				cam_in_bad = 0
 			else:
 				cam_in_bad += 1
-		if cap2.isOpened():
-			if need_read:
-				cam_out, frame2 = cap2.read()
-			else:
-				cam_out = cap2.grab()
 			if cam_out:
 				cam_cnt += 1
 				cam_out_bad = 0
 			else:
 				cam_out_bad += 1
-		if cam_cnt == 0 or cam_out_bad > 10 or cam_in_bad > 10:
-			break
-		cnt += 1
-		if pause:
-			after_pause += 1
-			if after_pause % again == 0:
+			log_text = ""
+			if cam_cnt == 0 or cam_out_bad > 10 or cam_in_bad > 10:
+				log_text += f"Cameras bads: {cam_in_bad} and {cam_out_bad}"
+				break
+			cnt += 1
+			if pause:
+				src1.paused = True
+				src2.paused = True
+				time.sleep(pause_secs)
+				src1.paused = False
+				src2.paused = False
 				pause = False
-		if local_read:
-			if cam_in:
-				frames1.append(frame1)
-			if cam_out:
-				frames2.append(frame2)
-			if len(frames1 + frames2) == batch:
+			elif frames1 and frames2 and len(frames1 + frames2) == batch:
 				frames_boxes_list = boxes(frames1 + frames2)
 				frames_boxes_list1 = frames_boxes_list[:len(frames1)]
 				frames_boxes_list2 = frames_boxes_list[len(frames1):]
@@ -218,7 +279,6 @@ def generate(cam1: Camera, cam2: Camera, src1: str, src2: str, ocr: PaddleOCR, a
 						frame = frame2 if len(numbers_list2) > 0 else frame1
 				if len(allow_nums) > 0:
 					pause = True
-					after_pause = 0
 					if last_open < datetime.datetime.now() - datetime.timedelta(seconds=10):
 						open_close(cam, do_open=True, save_event=False)
 						last_open = datetime.datetime.now()
@@ -255,25 +315,29 @@ def generate(cam1: Camera, cam2: Camera, src1: str, src2: str, ocr: PaddleOCR, a
 						if not empty_num:
 							prev_numbers = numbers_list
 						last_num_save = datetime.datetime.now()
-				logging.warning(f"cnt={cnt}, frames_boxes_list1={frames_boxes_list1}, frames_boxes_list2={frames_boxes_list2}, numbers_list1={numbers_list1}, numbers_list2={numbers_list2}")
+				log_text += f"cnt={cnt}, frames_boxes_list1={frames_boxes_list1}, frames_boxes_list2={frames_boxes_list2}, numbers_list1={numbers_list1}, numbers_list2={numbers_list2}"
 				frames1 = []
 				frames2 = []
-		if not is_local:
-			if last_frame_read:
-				frame = cv2.resize(frame1, (590, 290), interpolation=cv2.INTER_LINEAR)
+
+			if is_preview and last_cam_frame < datetime.datetime.now() - datetime.timedelta(seconds=1) and frame1.shape == frame2.shape:
+				frame = np.concatenate((frame1, frame2), axis=0)
+				frame = cv2.resize(frame, (590, 290 * 2), interpolation=cv2.INTER_LINEAR)
 				# frame = cv2.putText(frame, prefix + (" ! " if pause else "") + numbers_list.__str__(), (15, 35), cv2.FONT_HERSHEY_SIMPLEX,	fontScale=1, color=(255, 100, 0), thickness=2, lineType=cv2.LINE_AA)
 				(flag, encodedImage) = cv2.imencode(".jpg", frame)
 				jpeg_bytes = encodedImage.tobytes()
-				# yield the output frame in the byte format
-				yield(b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
+				yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
 				last_cam_frame = datetime.datetime.now()
-				# time.sleep(last_cam_msecs * 0.7 / 1000)
 			else:
 				yield
-			if cam_started < datetime.datetime.now() - datetime.timedelta(seconds=30):
-				break
-		else:
-			yield
+
+			sleep_secs = min(sleep_msecs, max(10, sleep_msecs - (datetime.datetime.now() - last_processing).microseconds // 1000)) / 1000
+			time.sleep(sleep_secs)
+			logging.warning(f"{log_text + ' | ' if log_text else ''}Sleeping {sleep_secs} s. Frames {frame1.shape} {frame2.shape}")
+			last_processing = datetime.datetime.now()
+
+	finally:
+		src1.stop()
+		src2.stop()
 
 
 def get_client_ip(request):
@@ -291,7 +355,8 @@ def video(request, id: int):
 	if not request.user.is_authenticated and not is_local:
 		return redirect(f"{settings.LOGIN_URL}?next={request.path}")
 	if not request.user.is_superuser and not is_local:
-		cam = Camera.objects.get(Q(id=id) & Q(owner_id=request.user.id))
+		ids = LocationUser.objects.filter(Q(user=request.user) & Q(deleted__isnull=True)).values_list('location', flat=True)
+		cam = Camera.objects.get(Q(id=id) & (Q(location_id__in=ids) | Q(owner=request.user) | Q(owner__isnull=True)))
 		cam1 = Camera.objects.get(Q(location_id=cam.location_id) & Q(inout="IN") & Q(owner_id=request.user.id))
 		cam2 = Camera.objects.get(Q(location_id=id) & Q(inout="OUT") & Q(owner_id=request.user.id))
 	else:
@@ -300,12 +365,8 @@ def video(request, id: int):
 		cam2 = Camera.objects.get(Q(location_id=cam.location_id) & Q(inout="OUT"))
 	if not cam1 and not cam2:
 		return redirect(f"{settings.LOGIN_URL}?next={request.path}")
-	if is_local:
-		from paddleocr import PaddleOCR
-		ocr = PaddleOCR(use_angle_cls=False, lang="en")  # отключение распознавания перевёрнутых текстов для скорости
-	else:
-		ocr = None
-		cam1 = cam
+	from paddleocr import PaddleOCR
+	ocr = PaddleOCR(use_angle_cls=False, lang="en")  # отключение распознавания перевёрнутых текстов для скорости
 	loc = cam1.location
 	logging.warning(f"ocr loaded cam={loc}")
 	if loc.allowed:
@@ -313,12 +374,73 @@ def video(request, id: int):
 		allowed = [x.strip().upper() for x in allowed]
 	else:
 		allowed = []
-	src1 = cam1.url or cam1.sample.path
-	src2 = cam2.url or cam2.sample.path
+	src1_url = cam1.url or cam1.sample.path
+	src2_url = cam2.url or cam2.sample.path
+	src1 = Capture(cam1.pk, src1_url, 5, 2)
+	src2 = Capture(cam2.pk, src2_url, 5, 2)
 	token = ewelink_auth()
 	loc.token = token
 	loc.save()
-	res = StreamingHttpResponse(generate(cam1, cam2, src1, src2, ocr, allowed, is_local), content_type = "multipart/x-mixed-replace; boundary=frame")
+	res = StreamingHttpResponse(generate(cam1, cam2, src1, src2, ocr, allowed, request.user.is_authenticated and is_local), content_type = "multipart/x-mixed-replace; boundary=frame")
+	# res["Cache-Control"] = "no-cache"  # prevent client cache
+	# res["X-Accel-Buffering"] = "no"  # Allow Stream over NGINX server
+	return res
+
+
+def images(src: Capture, url: str):
+	cnt = 0
+	last_cam_frame = datetime.datetime.now() - datetime.timedelta(hours=1)
+	last_cam_msecs = 500
+	cam_started = datetime.datetime.now()
+	if not src:
+		cam = cv2.VideoCapture(f"rtspsrc location={url} ! decodebin ! videoconvert ! appsink max-buffers=1 drop=true")
+	else:
+		cam = None
+	try:
+		while True:
+			cam_bad = 0
+			cam_ok, frame = cam.read() if cam else src.get_frame()
+			last_frame_read = last_cam_frame < datetime.datetime.now() - datetime.timedelta(milliseconds=last_cam_msecs)
+			if cam_ok:
+				cam_bad = 0
+			else:
+				cam_bad += 1
+			if cam_bad > 10:
+				break
+			cnt += 1
+			if cam_ok and last_frame_read:
+				frame = cv2.resize(frame, (590, 290), interpolation=cv2.INTER_LINEAR)
+				(flag, encodedImage) = cv2.imencode(".jpg", frame)
+				jpeg_bytes = encodedImage.tobytes()
+				yield(b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
+				last_cam_frame = datetime.datetime.now()
+				# time.sleep(last_cam_msecs * 0.7 / 1000)
+			else:
+				yield
+			time.sleep(last_cam_msecs * 0.7 / 1000)
+			if cam_started < datetime.datetime.now() - datetime.timedelta(seconds=30):
+				if src:
+					src.stop()
+				break
+	finally:
+		if src:
+			src.stop()
+
+
+def image(request, id: int):
+	is_local = get_client_ip(request)
+	if not request.user.is_authenticated and not is_local:
+		return redirect(f"{settings.LOGIN_URL}?next={request.path}")
+	if not request.user.is_superuser and not is_local:
+		ids = LocationUser.objects.filter(Q(user=request.user) & Q(deleted__isnull=True)).values_list("location", flat=True)
+		cam = Camera.objects.get(Q(id=id) & (Q(location_id__in=ids) | Q(owner=request.user) | Q(owner__isnull=True)))
+	else:
+		cam = Camera.objects.get(Q(id=id))
+	if not cam:
+		return redirect(f"{settings.LOGIN_URL}?next={request.path}")
+	src_url = cam.url or cam.sample.path
+	src = None if False else Capture(cam.pk, src_url, 10, 1)
+	res = StreamingHttpResponse(images(src, src_url), content_type = "multipart/x-mixed-replace; boundary=frame")
 	# res["Cache-Control"] = "no-cache"  # prevent client cache
 	# res["X-Accel-Buffering"] = "no"  # Allow Stream over NGINX server
 	return res
