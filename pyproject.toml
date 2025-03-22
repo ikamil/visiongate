@@ -1,0 +1,20 @@
+[project]
+name = "visiongate"
+version = "0.8.3"
+description = "Система контроля проезда на основе анализа номерных знаков"
+requires-python = ">=3.10.0, <3.11"
+dependencies = [
+    "psycopg2",
+    "django",
+    "admin-totals",
+    "django-admin-autocomplete-filter",
+    "requests",
+    "django-import-export",
+    "Pillow",
+    "django-jazzmin",
+    "opencv-python",
+    "onnxruntime",
+    "paddlepaddle",
+    "paddleocr",
+    "setuptools"
+]
