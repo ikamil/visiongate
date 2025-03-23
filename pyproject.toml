@@ -16,5 +16,5 @@ dependencies = [
     "onnxruntime",
     "paddlepaddle",
     "paddleocr",
-    "setuptools"
+    "setuptools",
 ]
