@@ -1,52 +1,52 @@
 # visiongate
-Система контроля проезда на основе анализа номерных знаков
+License plate recognition-based access control system
 
-# Принципиальная архитектура системы
-1. Распознавание bounding-box образов номерных знаков на основе YOLO модели, обученной на распознавание номерных знаков
-2. OCR-распознавание текста внутри bounding-box зон кадра
-3. Django-админ-панель в качестве развёртывания самой модели и настройки управления системой
-4. Локации - сущность, где устанавливаются источники видео-потоков
-5. Локации содержат списки Разрешённых номерных знаков (соответствующее поле-список)
-6. Камеры - привязываются к Локации, имеют Направление, а также и включают rstp ссылки и примеры файлов видеопотока
-7. События - журнал распознанных в Локации объектов-номеров, при совпадении из списка из Разрешённых
+# Core system architecture
+1. Bounding-box detection of license plate images using a YOLO model trained for license plate recognition
+2. OCR text recognition within bounding-box zones of the frame
+3. Django admin panel as the deployment interface for the model and system configuration
+4. Locations — entities where video stream sources are configured
+5. Locations contain lists of Allowed license plates (corresponding list field)
+6. Cameras — linked to a Location, have a Direction, and include rtsp links and sample video stream files
+7. Events — a log of recognized license plate objects within a Location, triggered on match with the Allowed list
 
-# Бизнес-ценность
-1. Локальное или облачное решение по контролю доступа на базе стандартного ПК
-2. Возможность подключения любых rstp-источников, например rtsp-ip-камер
-3. Аналитика событий: и в web-интерфейсе, и в БД Postgres
-4. Возможность удобной настройки разрешённых номеров в web-интерфейсе
-5. Возможность расширения YOLO модели распознавания образов посредством дообучения
-6. Возможность расширить функционал, например реализовать распознавание лиц при наличии GPU
-7. Выгрузка CSV-файла событий
+# Business value
+1. Local or cloud-based access control solution running on a standard PC
+2. Support for any rtsp sources, such as rtsp IP cameras
+3. Event analytics: both in the web interface and in the Postgres database
+4. Convenient management of allowed license plates via the web interface
+5. Ability to extend the YOLO recognition model through fine-tuning
+6. Ability to extend functionality, e.g. implement face recognition with a GPU available
+7. CSV export of events
 
-# Основные файлы, реализующие работу модели и приложения
-- visiongate/main/models.py - схема данных
-- visiongate/main/views.py - работа с onnx моделью в ендпойнте Django
-- visiongate/main/numberplate.py - iou-вычисление bounding-box и запуск PaddleOCR
-- visiongate/main/admin.py - интерфейсная часть админ-панели
-- Итоговая_Аттестация.ipynb - обучение модели, выгрузка ONNX, принципиальная проверка работоспособности
-- https://colab.research.google.com/drive/1IGudyk6Hvj-adFBQs86s-ol0WK_IQwB4?usp=drive_link - Colab-демонстрация работы модели и распознавания
+# Core files implementing the model and application
+- visiongate/main/models.py - data schema
+- visiongate/main/views.py - ONNX model handling in the Django endpoint
+- visiongate/main/numberplate.py - IOU bounding-box calculation and PaddleOCR execution
+- visiongate/main/admin.py - admin panel interface layer
+- Итоговая_Аттестация.ipynb - model training, ONNX export, and basic functionality verification
+- https://colab.research.google.com/drive/1IGudyk6Hvj-adFBQs86s-ol0WK_IQwB4?usp=drive_link - Colab demo of the model and recognition workflow
 
-# Настройка локаций и камер
-1. Авторизоваться на сайте https://visiongate.ru/admin
-2. Перейти в раздел Локации https://visiongate.ru/admin/main/location/, нажать Создать
-3. Указать в поле "Разрешённые" построчный список разрешённых номерных знаков
-4. Перейти в раздел Камеры https://visiongate.ru/admin/main/camera/, нажать Создать
-5. Указать Локацию, Направление (вход-выход), загрузить демо-ролик и указать rtsp ссылку на камеру
+# Configuring locations and cameras
+1. Log in at https://visiongate.ru/admin
+2. Go to the Locations section https://visiongate.ru/admin/main/location/, click Create
+3. Enter a line-by-line list of allowed license plates in the "Allowed" field
+4. Go to the Cameras section https://visiongate.ru/admin/main/camera/, click Create
+5. Specify the Location, Direction (entry/exit), upload a demo video, and enter the rtsp link to the camera
 
-# Просмотр анализа видеопотока
-1. Выбрать любую из камер https://visiongate.ru/admin/main/camera/
-2. Открыть детальную информацию по камере, например https://visiongate.ru/admin/main/camera/2/change/
-3. Демонстрационное видео можно просмотреть в блоке **Просмотр пример видео**
-4. Демонстрацию работы ML-модели распознавания bounding-box образов номерного знака, и последующего распознанного текста - можно посмотреть в блоке **Просмотр контроля**  
+# Viewing video stream analysis
+1. Select any camera at https://visiongate.ru/admin/main/camera/
+2. Open the camera detail page, e.g. https://visiongate.ru/admin/main/camera/2/change/
+3. The demo video can be viewed in the **Sample video preview** block
+4. The ML model's bounding-box detection and subsequent text recognition can be viewed in the **Access control preview** block
 
-# Установка
-## Скачивание и запуск docker compose сборки
+# Installation
+## Downloading and running the Docker Compose build
 1. `git clone https://github.com/ikamil/visiongate.git`
 2. `cd visiongate`
 3. `docker compose up -d`
 
-## Создание БД
+## Creating the database
 ```
 root@lkwuthwrux:~# docker exec -it visiongate-pg-1 bash
 root@17d007ef0c92:/# su - postgres
@@ -57,13 +57,13 @@ Type "help" for help.
 postgres=# create user visiongate password 'visiongate' login;
 postgres=# create database visiongate owner visiongate;
 ```
-## Опционально: или раскат текущего дампа демо-данных БД
+## Optional: restore the current demo database dump
 ```
 root@lkwuthwrux:~# docker exec -it visiongate-pg-1 bash
 root@17d007ef0c92:/# su - postgres
 postgres@17d007ef0c92:~$ cat /tmp/data/visiongate.sql > psql visiongate
 ```
-## Опционально: или создание админ-юзера и раскатка миграций
+## Optional: create an admin user and run migrations
 ```
 root@lkwuthwrux:~# docker exec -it visiongate-python-1 bash
 root@8225c6af5bbb:/# python /code/visiongate/manage.py createsuperuser
