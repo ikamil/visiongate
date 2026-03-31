@@ -35,6 +35,7 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path('', home),
     path("video/<int:id>/", video, name="video"),
+    path("image/<int:id>/", image, name="image"),
     path("open/<int:id>/", gate_open, name="open", kwargs={"do_open": True}),
     path("close/<int:id>/", gate_open, name="close", kwargs={"do_open": False}),
     path("status/<int:id>/", gate_open, name="status", kwargs={"do_open": None}),

@@ -14,12 +14,11 @@ create or replace function change(src text, i int, v text) returns text language
 $$;
 
 -- подмена некорректных или похожих символов
-create or replace function unify_replace(src text) returns text language plpgsql immutable as $$
+create or replace function unify_replace(src text, dict jsonb) returns text language plpgsql immutable as $$
 declare res text := src;
-REPLACE_ jsonb := '{"D": "0", "Q": "0", "O": "0", "R": "K", ".": "", ",": "", "/": "7", "V": "Y", "|": "", "I": "", " ": ""}';
 r text; v text;
 begin
-    FOR r, v IN SELECT * FROM jsonb_each_text(REPLACE_) LOOP
+    FOR r, v IN SELECT * FROM jsonb_each_text(dict) LOOP
 --         RAISE NOTICE 'REPLACE %: % => %', res, r, v;
         res := replace(res, r, v);
     END LOOP;
@@ -29,12 +28,15 @@ $$;
 
 -- Унификация номеров с подменой и заменой на позициях
 create or replace function unify(src text) returns text language plpgsql immutable as $$
-declare res text := unify_replace(src);
-INPLACE jsonb := '{"0": {"4": "A", "X": "K", "V": "Y", "9": "B", "7": "T", "1": "T"},
+declare
+    REPLACE_ jsonb := '{"D": "0", "Q": "0", "O": "0", "R": "K", ".": "", ",": "", "V": "Y", "|": "", "I": "", " ": ""}';
+    REPLACE2 jsonb := '{"/": "7"}';
+    res text := unify_replace(src, REPLACE_);
+    INPLACE jsonb := '{"0": {"4": "A", "X": "K", "V": "Y", "9": "B", "7": "T", "1": "T"},
 		   "4,5": {"0": "C", "8": "B", "1": "T", "3": "B", "7": "T", "V": "Y", "X": "K", "9": "B"},
 		   "1,2,3": {"B": "8", "A": "4"},
 		   "6": {"M": "11"}}';
-CHANGES jsonb := '{"10": {"7": ""}}';
+CHANGES jsonb := '{"10": {"6": ""}}';
 r text; v text; i_ text; d jsonb; ii text;  i int; l_ text; c jsonb; ll text; l int;
 begin
     for i_, d in SELECT * FROM jsonb_each(INPLACE) LOOP
@@ -65,6 +67,8 @@ begin
             end if;
         end loop;
     end loop;
+
+    res := unify_replace(res, REPLACE2);
     return res;
 end;
 $$;
@@ -76,7 +80,7 @@ with src as (select (regexp_matches(payload, '''[0-9A-Z\.\/]{8,}''', 'g'))[1] ma
     un as (select cnt, num, img, uni from trm where cnt > 1 or (num = uni and length(num) between 8 and 9)),
     cnts as (select uni, max(cnt) qty, count(distinct num) nums, max(img) image from un group by uni)
 select distinct uni||' : '||qty||'-'||nums,  'https://visiongate.ru/uploads/'||image url, qty, nums
-from cnts join un using (uni) where (qty > 1 or nums > 1 )
+from cnts join un using (uni) --where (qty > 1 or nums > 1 )
 order by qty desc, nums desc;
 
 -- <список из номеров> для добавления этих номеров на разрешение в локацию
@@ -90,3 +94,5 @@ from cnts join un using (uni) where (qty > 1 or nums > 1);
 
 -- шаблон запроса на обновление списка допустимых номеров
 update main_location set allowed = allowed||chr(13)||'<список из номеров>' where id = '<ИД локации>';
+
+select unify('X000XX/116');
